@@ -18,19 +18,12 @@ from approvals import (
     DRAFT, PRE_BR, BR,
 )
 
-# [NEW] Импортируем функцию проверки пароля
 from auth import check_password
 
-# Настройка страницы (должна быть первой командой Streamlit)
 st.set_page_config(page_title="Управленческая отчётность", layout="wide")
 
-# [NEW] Проверка авторизации
 if not check_password():
-    st.stop()  # Если пароль не введен, останавливаем приложение
-
-# ---------- Дальше идет весь остальной код (zebra_style, загрузка файлов и т.д.) ----------
-
-st.set_page_config(page_title="Управленческая отчётность", layout="wide")
+    st.stop()
 
 def zebra_style(x):
     css = pd.DataFrame('', index=x.index, columns=x.columns)
@@ -83,6 +76,19 @@ def fmt_pct(value, decimals=1):
         return "—"
     formatted = f"{abs(value):.{decimals}f}"
     return f"−{formatted}%" if value < 0 else f"+{formatted}%" if value > 0 else f"{formatted}%"
+
+# --- КНОПКА ОБНОВЛЕНИЯ (ПЕРЕНЕСЕНА НАВЕРХ) ---
+if st.sidebar.button("🔄 Обновить данные", width="stretch"):
+    with st.spinner("Загружаю данные с Яндекс.Диска..."):
+        from loader import update_data
+        success, message = update_data()
+    if success:
+        st.sidebar.success(message)
+        st.cache_data.clear()
+        st.rerun()
+    else:
+        st.sidebar.error(f"Ошибка: {message}")
+# ---------------------------------------------
 
 snapshot_files = sorted(glob.glob(str(SNAPSHOTS_DIR / "*.xlsx")), reverse=True)
 if not snapshot_files:
@@ -142,23 +148,7 @@ def build_options(snapshots, is_comp=False):
         options.append(opt)
     return options
 
-
-
 st.sidebar.markdown("---")
-
-# --- КНОПКА ОБНОВЛЕНИЯ ---
-if st.sidebar.button("🔄 Обновить данные", width="stretch"):
-    with st.spinner("Загружаю данные с Яндекс.Диска..."):
-        from loader import update_data
-        success, message = update_data()
-    
-    if success:
-        st.sidebar.success(message)
-        st.cache_data.clear()
-        st.rerun()
-    else:
-        st.sidebar.error(f"Ошибка: {message}")
-# ------------------------
 
 st.sidebar.header("Период (→ PREV-BR)")
 week_labels = [weeks[k]["label"] for k in week_keys]
@@ -230,7 +220,7 @@ st.sidebar.markdown("---")
 
 prev_br_date = get_last_br_before(selected_date)
 comparison_snapshot = None
-comparison_deals = None  # Инициализируем заранее
+comparison_deals = None
 
 if prev_br_date:
     for s in all_snapshots:
@@ -692,158 +682,3 @@ for s in all_snapshots:
     
     try:
         w_data = load_snapshot(s["path"])
-        w_rev_df = w_data["revenue"]
-        if selected_by != "Все":
-            w_rev_df = w_rev_df[w_rev_df["БЮ"] == selected_by]
-        w_rev_b = w_rev_df["Выручка_бюджет"].sum()
-        w_rev_pr = w_rev_df["Выручка_прогноз"].sum()
-        
-        w_dr_df = w_data["direct"]
-        if selected_by != "Все":
-            w_dr_df = w_dr_df[w_dr_df["БЮ"] == selected_by]
-        w_staff_b = w_dr_df["StaffCost_бюджет"].sum()
-        w_staff_pr = w_dr_df["StaffCost_прогноз"].sum()
-        w_cogs_b = w_dr_df["COGS_бюджет"].sum()
-        w_cogs_pr = w_dr_df["COGS_прогноз"].sum()
-        
-        w_sga_df = w_data["sga"]
-        w_sga_b = w_sga_df["SGA_бюджет"].sum()
-        w_sga_pr = w_sga_df["SGA_прогноз"].sum()
-
-        w_gp3_b = w_rev_b - (w_staff_b + w_cogs_b)
-        w_gp3_pr = w_rev_pr - (w_staff_pr + w_cogs_pr)
-        w_ebitda_b = w_gp3_b - w_sga_b
-        w_ebitda_pr = w_gp3_pr - w_sga_pr
-
-        monday = s["datetime"] - pd.Timedelta(days=s["datetime"].weekday())
-        all_weeks_data.append({
-            "Неделя": monday,
-            "Revenue": w_rev_pr - w_rev_b,
-            "StaffCost": w_staff_pr - w_staff_b,
-            "COGS": w_cogs_pr - w_cogs_b,
-            "Прямые расходы": (w_staff_pr + w_cogs_pr) - (w_staff_b + w_cogs_b),
-            "SGA": w_sga_pr - w_sga_b,
-            "GP3": w_gp3_pr - w_gp3_b,
-            "EBITDA": w_ebitda_pr - w_ebitda_b,
-        })
-    except Exception:
-        continue
-
-if all_weeks_data:
-    trend_df = pd.DataFrame(all_weeks_data).sort_values("Неделя")
-    metric = st.radio(
-        "Показатель",
-        ["Revenue", "Прямые расходы", "StaffCost", "COGS", "SGA", "GP3", "EBITDA"],
-        horizontal=True,
-        key="trend_metric",
-    )
-    
-    fig_trend = px.line(trend_df, x="Неделя", y=metric, markers=True, title=f"Отклонение прогноза {metric} от плана")
-    fig_trend.update_layout(
-        xaxis=dict(
-            tickformat="%d.%m",
-            tickmode="array",
-            tickvals=trend_df["Неделя"],
-            ticktext=[d.strftime("%d.%m") for d in trend_df["Неделя"]]
-        ),
-        height=400,
-    )
-    fig_trend.add_hline(y=0, line_dash="dash", line_color="gray")
-    st.plotly_chart(fig_trend, width="stretch")
-
-st.markdown("---")
-
-st.subheader("Динамика по неделям")
-dyn_metric = st.radio(
-    "Что показывать на графике", 
-    ["Revenue (общая)", "Revenue (по типам)", "Прямые расходы", "SGA", "GP3", "EBITDA"], 
-    horizontal=True, 
-    key="dyn_metric"
-)
-
-week_dyn = []
-seen_weeks_dyn = set()
-
-for s in all_snapshots:
-    week_key = s["datetime"].strftime("%Y-W%W")
-    if week_key in seen_weeks_dyn:
-        continue
-    seen_weeks_dyn.add(week_key)
-    
-    try:
-        w_data = load_snapshot(s["path"])
-        w_rev, w_dr, w_sg = w_data["revenue"], w_data["direct"], w_data["sga"]
-        if selected_by != "Все":
-            w_rev = w_rev[w_rev["БЮ"] == selected_by]
-            w_dr = w_dr[w_dr["БЮ"] == selected_by]
-
-        w_rev_total = w_rev["Выручка_факт"].sum()
-        w_rev_backlog = w_rev["Выручка_Backlog"].sum() if "Выручка_Backlog" in w_rev.columns else 0
-        w_rev_pipeline = w_rev["Выручка_Pipeline"].sum() if "Выручка_Pipeline" in w_rev.columns else 0
-        w_rev_gap = w_rev["Выручка_Extra_GAP"].sum() if "Выручка_Extra_GAP" in w_rev.columns else 0
-
-        w_staff, w_cogs = w_dr["StaffCost_факт"].sum(), w_dr["COGS_факт"].sum()
-        w_direct = w_staff + w_cogs
-        w_sga = w_sg["SGA_факт"].sum()
-        w_gp3 = w_rev_total - w_direct
-        w_ebitda = w_gp3 - w_sga
-
-        monday = s["datetime"] - pd.Timedelta(days=s["datetime"].weekday())
-        week_dyn.append({
-            "Неделя": monday, 
-            "Revenue": w_rev_total, 
-            "Revenue_Backlog": w_rev_backlog,
-            "Revenue_Pipeline": w_rev_pipeline, 
-            "Revenue_Extra_GAP": w_rev_gap,
-            "StaffCost": w_staff, 
-            "COGS": w_cogs, 
-            "Прямые расходы": w_direct,
-            "SGA": w_sga, 
-            "GP3": w_gp3, 
-            "EBITDA": w_ebitda,
-        })
-    except Exception:
-        continue
-
-if week_dyn:
-    dyn_df = pd.DataFrame(week_dyn).sort_values("Неделя")
-
-    if dyn_metric == "Revenue (общая)":
-        y_cols = ["Revenue"]
-        title = "Revenue по неделям"
-    elif dyn_metric == "Revenue (по типам)":
-        y_cols = ["Revenue_Backlog", "Revenue_Pipeline", "Revenue_Extra_GAP"]
-        title = "Revenue по типам (Backlog / Pipeline / Extra GAP)"
-    elif dyn_metric == "Прямые расходы":
-        y_cols = ["StaffCost", "COGS"]
-        title = "Прямые расходы: StaffCost vs COGS"
-    elif dyn_metric == "SGA":
-        y_cols = ["SGA"]
-        title = "SGA по неделям"
-    elif dyn_metric == "GP3":
-        y_cols = ["GP3"]
-        title = "GP3 по неделям"
-    elif dyn_metric == "EBITDA":
-        y_cols = ["EBITDA"]
-        title = "EBITDA по неделям"
-    else:
-        y_cols = ["Revenue", "Прямые расходы", "SGA", "GP3", "EBITDA"]
-        title = "Все ключевые показатели по неделям"
-
-    fig_dyn = px.line(dyn_df, x="Неделя", y=y_cols, markers=True, title=title)
-    fig_dyn.update_layout(
-        height=450, 
-        xaxis=dict(
-            tickformat="%d.%m", 
-            tickmode="array", 
-            tickvals=dyn_df["Неделя"], 
-            ticktext=[d.strftime("%d.%m") for d in dyn_df["Неделя"]]
-        )
-    )
-    st.plotly_chart(fig_dyn, width="stretch")
-
-    with st.expander("Показать данные по неделям"):
-        display_df = dyn_df.copy()
-        display_df["Неделя"] = display_df["Неделя"].dt.strftime("%d.%m.%Y")
-        styler = display_df.style.apply(zebra_style, axis=None).hide(axis="index")
-        st.dataframe(styler, width="stretch", height=350)
