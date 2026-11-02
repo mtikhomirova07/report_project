@@ -1,168 +1,93 @@
-import yadisk
+import streamlit as st
 import pandas as pd
+import io
+import requests
+import glob
 from datetime import datetime
 from pathlib import Path
-import logging
-import sys
-from notifier import send_error_email
 
-# ---------- НАСТРОЙКИ ----------
-TOKEN = "y0__wgBENmAzqeq94ACGNuWAyCN_rSmGV7XnACBcxC1jJgTe34-wzwi8bFd"
-SOURCE_PATH = "/test_v2.xlsx"
-TODAY = datetime.now().strftime("%Y-%m-%d")
-
-# Папки проекта
+# Пути к папкам
 BASE_DIR = Path(__file__).parent
-DATA_DIR = BASE_DIR / "data"
-LIVE_DIR = DATA_DIR / "live"
-SNAPSHOTS_DIR = DATA_DIR / "snapshots"
-LOGS_DIR = DATA_DIR / "logs"
+SNAPSHOTS_DIR = BASE_DIR / "data" / "snapshots"
+LOGS_DIR = BASE_DIR / "data" / "logs"
 
-# Создаём папки, если их нет
-for d in [LIVE_DIR, SNAPSHOTS_DIR, LOGS_DIR]:
-    d.mkdir(parents=True, exist_ok=True)
+# Создаем папки, если их нет
+SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-# ---------- ЛОГИРОВАНИЕ ----------
-logging.basicConfig(
-    filename=LOGS_DIR / "loading.log",
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    encoding="utf-8",
-)
+# Получаем токен из секретов Streamlit (если он там есть)
+try:
+    YANDEX_TOKEN = st.secrets["YANDEX_TOKEN"]
+except Exception:
+    # Если секретов нет (запуск локально), используем токен напрямую
+    YANDEX_TOKEN = "y0__wgBENmAzqeq94ACGKe9TiD99KHQGUI7OezfAC1bXzcTrARWQ753zG3n"
 
-error_logger = logging.getLogger("errors")
-error_logger.setLevel(logging.ERROR)
-error_handler = logging.FileHandler(LOGS_DIR / "errors.log", encoding="utf-8")
-error_handler.setFormatter(logging.Formatter("%(asctime)s | %(message)s"))
-error_logger.addHandler(error_handler)
+# Путь к папке на Яндекс.Диске. 
+# Если файл лежит в корне Диска, оставьте "/".
+# Если в папке "Отчеты", напишите "/Отчеты".
+FOLDER_PATH = "/" 
 
-# ---------- ТРЕБОВАНИЯ К ДАННЫМ ----------
-REQUIRED_SHEETS = ["Сделки", "Выручка", "Прямые расходы", "SGA"]
+def get_latest_excel_from_yandex():
+    """Ищет самый свежий Excel-файл на Яндекс.Диске и скачивает его."""
+    url = "https://cloud-api.yandex.net/v1/disk/resources"
+    headers = {"Authorization": f"OAuth {YANDEX_TOKEN}"}
+    
+    # 1. Получаем список файлов в папке
+    params = {"path": FOLDER_PATH, "limit": 100}
+    response = requests.get(url, headers=headers, params=params)
+    
+    if response.status_code != 200:
+        raise Exception(f"Ошибка доступа к Яндекс.Диску: {response.text}")
+    
+    items = response.json().get("_embedded", {}).get("items", [])
+    
+    # Фильтруем только Excel-файлы
+    excel_files = [i for i in items if i["name"].endswith(".xlsx") and i["type"] == "file"]
+    
+    if not excel_files:
+        raise Exception("На Яндекс.Диске нет файлов с расширением .xlsx")
+    
+    # 2. Берем самый свежий по дате модификации
+    latest = max(excel_files, key=lambda x: x["modified"])
+    
+    # 3. Скачиваем его
+    download_url = latest["file"]
+    file_response = requests.get(download_url, headers=headers)
+    
+    if file_response.status_code != 200:
+        raise Exception(f"Не удалось скачать файл: {latest['name']}")
+    
+    return file_response.content, latest["name"]
 
-REQUIRED_COLUMNS = {
-    "Сделки": ["ID_сделки", "БЮ", "Сумма_сделки", "Вероятность", "Статус"],
-    "Выручка": ["БЮ", "Квартал", "Выручка_бюджет", "Выручка_факт"],
-    "Прямые расходы": ["БЮ", "Квартал", "StaffCost_факт", "COGS_факт"],
-    "SGA": ["Квартал", "SGA_факт"],
-}
-
-
-# ---------- ВАЛИДАЦИЯ ----------
-def validate(df_dict):
-    """Проверяет, что данные корректные. Возвращает список ошибок."""
-    errors = []
-
-    # 1. Проверка листов
-    for sheet in REQUIRED_SHEETS:
-        if sheet not in df_dict:
-            errors.append(f"Отсутствует лист '{sheet}'")
-            continue
-
-        df = df_dict[sheet]
-
-        # 2. Проверка колонок
-        for col in REQUIRED_COLUMNS[sheet]:
-            if col not in df.columns:
-                errors.append(f"Лист '{sheet}': нет колонки '{col}'")
-
-        # 3. Проверка на пустоту
-        if df.empty:
-            errors.append(f"Лист '{sheet}' пустой")
-            continue
-
-        # 4. Проверка ключевых полей на пустые значения
-        key_cols = REQUIRED_COLUMNS[sheet][:2]
-        for col in key_cols:
-            if col in df.columns and df[col].isna().any():
-                errors.append(f"Лист '{sheet}': колонка '{col}' содержит пустые значения")
-
-    return errors
-
-
-# ---------- ЗАГРУЗКА ----------
-def load_and_save():
-    """Скачивает данные с Диска, валидирует и сохраняет снимок."""
-    logging.info("=" * 60)
-    logging.info(f"Начало загрузки за {TODAY}")
-
+def update_data():
+    """Скачивает свежий файл и сохраняет его в папку snapshots."""
     try:
-        # 1. Скачиваем с Яндекс.Диска
-        logging.info(f"Скачиваю {SOURCE_PATH} с Яндекс.Диска")
-        client = yadisk.Client(token=TOKEN)
-        with client:
-            if not client.check_token():
-                raise Exception("Токен Яндекс.Диска недействителен")
-
-            local_path = LIVE_DIR / "current.xlsx"
-            client.download(SOURCE_PATH, str(local_path), overwrite=True)
-        logging.info(f"Файл скачан: {local_path}")
-
-        # 2. Читаем все листы
-        df_dict = {}
-        for sheet in REQUIRED_SHEETS:
-            df_dict[sheet] = pd.read_excel(local_path, sheet_name=sheet)
-        logging.info(f"Прочитано {len(df_dict)} листов")
-
-        # 3. Валидация
-        errors = validate(df_dict)
-
-        if errors:
-            # Есть ошибки — снимок НЕ сохраняем
-            error_msg = " | ".join(errors)
-            error_logger.error(f"Ошибки валидации за {TODAY}: {error_msg}")
-            logging.error(f"Загрузка прервана: {error_msg}")
-
-            # Отправляем email с уведомлением
-            send_error_email(errors, snapshot_date=TODAY)
-
-            return {
-                "success": False,
-                "errors": errors,
-                "date": TODAY,
-            }
-
-        # 4. Сохраняем снимок
-        snapshot_path = SNAPSHOTS_DIR / f"{TODAY}.xlsx"
-        with pd.ExcelWriter(snapshot_path, engine="openpyxl") as writer:
-            for sheet, df in df_dict.items():
-                df.to_excel(writer, sheet_name=sheet, index=False)
-
-        logging.info(f"Снимок сохранён: {snapshot_path}")
-        logging.info(f"Строк в листах: " + ", ".join(
-            f"{s}={len(df)}" for s, df in df_dict.items()
-        ))
-
-        return {
-            "success": True,
-            "errors": [],
-            "date": TODAY,
-            "path": str(snapshot_path),
-        }
-
+        print("Начинаю загрузку с Яндекс.Диска...")
+        content, filename = get_latest_excel_from_yandex()
+        
+        # Генерируем имя файла с текущей датой и временем
+        now = datetime.now().strftime("%Y-%m-%d_%H%M")
+        new_path = SNAPSHOTS_DIR / f"{now}.xlsx"
+        
+        # Сохраняем файл
+        with open(new_path, "wb") as f:
+            f.write(content)
+        
+        # Логируем успех
+        log_file = LOGS_DIR / "last_update.txt"
+        log_file.write_text(f"Успешно обновлено: {filename} в {now}", encoding="utf-8")
+        
+        print(f"Файл {filename} успешно загружен и сохранен.")
+        return True, f"Данные обновлены из файла {filename}"
+    
     except Exception as e:
-        error_logger.error(f"Критическая ошибка за {TODAY}: {e}")
-        logging.error(f"Критическая ошибка: {e}")
+        # Логируем ошибку
+        error_file = LOGS_DIR / "LAST_ERROR.txt"
+        error_file.write_text(str(e), encoding="utf-8")
+        print(f"Ошибка загрузки: {e}")
+        return False, str(e)
 
-        # Отправляем email с уведомлением о критической ошибке
-        send_error_email([f"Критическая ошибка: {e}"], snapshot_date=TODAY)
-
-        return {
-            "success": False,
-            "errors": [str(e)],
-            "date": TODAY,
-        }
-
-
-# ---------- ЗАПУСК ----------
 if __name__ == "__main__":
-    result = load_and_save()
-
-    if result["success"]:
-        print(f"✅ Загрузка успешна: {result['date']}")
-        print(f"   Файл: {result['path']}")
-        sys.exit(0)
-    else:
-        print(f"❌ Ошибка загрузки за {result['date']}:")
-        for err in result["errors"]:
-            print(f"   - {err}")
-        sys.exit(1)
+    # Если скрипт запускается напрямую (не через Streamlit), просто обновляем данные
+    success, message = update_data()
+    print(message)
