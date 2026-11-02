@@ -1,7 +1,7 @@
-streamlit==1.35.0
+streamlit
 pandas
 plotly
-st_aggrid
+st-aggrid
 fpdf2
 openpyxl
 requests
