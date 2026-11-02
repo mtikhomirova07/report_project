@@ -142,23 +142,7 @@ def build_options(snapshots, is_comp=False):
         options.append(opt)
     return options
 
-if LAST_ERROR_FILE.exists():
-    try:
-        error_text = LAST_ERROR_FILE.read_text(encoding="utf-8")
-        with st.sidebar.expander("Ошибка последней загрузки"):
-            st.code(error_text, language="text")
-    except Exception:
-        pass
 
-if st.sidebar.button("Обновить данные", width="stretch"):
-    with st.spinner("Загружаю..."):
-        result = subprocess.run([sys.executable, "loader.py"], capture_output=True, text=True, cwd=str(BASE_DIR))
-    if result.returncode == 0:
-        st.sidebar.success("Обновлено")
-        st.cache_data.clear()
-        st.rerun()
-    else:
-        st.sidebar.error(f"Ошибка: {result.stderr.strip()}")
 
 st.sidebar.markdown("---")
 
