@@ -162,6 +162,20 @@ if st.sidebar.button("Обновить данные", width="stretch"):
 
 st.sidebar.markdown("---")
 
+# --- КНОПКА ОБНОВЛЕНИЯ ---
+if st.sidebar.button("🔄 Обновить данные", width="stretch"):
+    with st.spinner("Загружаю данные с Яндекс.Диска..."):
+        from loader import update_data
+        success, message = update_data()
+    
+    if success:
+        st.sidebar.success(message)
+        st.cache_data.clear()
+        st.rerun()
+    else:
+        st.sidebar.error(f"Ошибка: {message}")
+# ------------------------
+
 st.sidebar.header("Период (→ PREV-BR)")
 week_labels = [weeks[k]["label"] for k in week_keys]
 selected_week_label = st.sidebar.selectbox("Неделя", week_labels, index=0, label_visibility="collapsed")
