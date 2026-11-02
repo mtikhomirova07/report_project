@@ -16,11 +16,7 @@ SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Получаем токен из секретов Streamlit (если он там есть)
-try:
-    YANDEX_TOKEN = st.secrets["YANDEX_TOKEN"]
-except Exception:
-    # Если секретов нет (запуск локально), используем токен напрямую
-    YANDEX_TOKEN = "y0__wgBENmAzqeq94ACGKe9TiD99KHQGUI7OezfAC1bXzcTrARWQ753zG3n"
+YANDEX_TOKEN = "y0__wgBENmAzqeq94ACGKe9TiD99KHQGUiTOezfAC1bXzcTrARWQ753zG3n"
 
 # Путь к папке на Яндекс.Диске. 
 # Если файл лежит в корне Диска, оставьте "/".
