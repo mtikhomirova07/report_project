@@ -55,7 +55,8 @@ FONT_BOLD = FONT_DIR / "DejaVuSans-Bold.ttf"
 
 def parse_timestamp(ts):
     try:
-        return datetime.strptime(ts, "%Y-%m-%d_%H%M")
+        # Обрезаем до 15 символов (YYYY-MM-DD_HHMM), чтобы отбросить имя файла
+        return datetime.strptime(ts[:15], "%Y-%m-%d_%H%M")
     except ValueError:
         return datetime.min
 
@@ -95,90 +96,77 @@ if not snapshot_files:
     st.error("Нет снимков. Нажмите «Обновить данные».")
     st.stop()
 
-all_snapshots = []
+# Группируем файлы по времени загрузки (YYYY-MM-DD_HHMM)
+snapshot_groups = {}
 for f in snapshot_files:
-    ts = Path(f).stem
-    dt = parse_timestamp(ts)
-    if dt != datetime.min:
-        all_snapshots.append({"timestamp": ts, "datetime": dt, "path": f})
-all_snapshots.sort(key=lambda x: x["datetime"], reverse=True)
+    stem = Path(f).stem
+    key = stem[:15]  # Берем только дату и время
+    if key not in snapshot_groups:
+        snapshot_groups[key] = []
+    snapshot_groups[key].append(f)
 
-weeks = {}
-for s in all_snapshots:
-    week_key = s["datetime"].strftime("%Y-W%W")
-    if week_key not in weeks:
-        weeks[week_key] = {"label": get_week_label(s["datetime"]), "snapshots": []}
-    weeks[week_key]["snapshots"].append(s)
-week_keys = sorted(weeks.keys(), reverse=True)
+group_keys = sorted(snapshot_groups.keys(), reverse=True)
 
 @st.cache_data
-def load_snapshot(path):
+def load_all_snapshots(paths):
+    """Загружает все файлы из группы и объединяет их."""
+    all_deals = []
+    all_revenue = []
+    all_direct = []
+    all_sga = []
+
+    for path in paths:
+        try:
+            xls = pd.ExcelFile(path)
+            sheet_names = xls.sheet_names
+            
+            # Ищем листы по названиям (с учетом возможных вариантов)
+            deals_sheet = next((s for s in sheet_names if s.lower() in ["сделки", "deals", "rev_ea_crm", "rev_corp"]), None)
+            revenue_sheet = next((s for s in sheet_names if s.lower() in ["выручка", "revenue"]), None)
+            direct_sheet = next((s for s in sheet_names if s.lower() in ["прямые расходы", "direct", "staff", "staff ea crm"]), None)
+            sga_sheet = next((s for s in sheet_names if s.lower() in ["sga"]), None)
+
+            if deals_sheet:
+                all_deals.append(pd.read_excel(path, sheet_name=deals_sheet))
+            if revenue_sheet:
+                all_revenue.append(pd.read_excel(path, sheet_name=revenue_sheet))
+            if direct_sheet:
+                all_direct.append(pd.read_excel(path, sheet_name=direct_sheet))
+            if sga_sheet:
+                all_sga.append(pd.read_excel(path, sheet_name=sga_sheet))
+        except Exception as e:
+            st.warning(f"Ошибка чтения файла {path}: {e}")
+
     return {
-        "deals": pd.read_excel(path, sheet_name="Сделки"),
-        "revenue": pd.read_excel(path, sheet_name="Выручка"),
-        "direct": pd.read_excel(path, sheet_name="Прямые расходы"),
-        "sga": pd.read_excel(path, sheet_name="SGA"),
+        "deals": pd.concat(all_deals, ignore_index=True) if all_deals else pd.DataFrame(),
+        "revenue": pd.concat(all_revenue, ignore_index=True) if all_revenue else pd.DataFrame(),
+        "direct": pd.concat(all_direct, ignore_index=True) if all_direct else pd.DataFrame(),
+        "sga": pd.concat(all_sga, ignore_index=True) if all_sga else pd.DataFrame(),
     }
 
-def agg(df, cols):
-    return {c: df[c].sum() if c in df.columns else 0 for c in cols}
-
-def build_options(snapshots, is_comp=False):
+def build_group_options(groups):
     options = []
-    date_counts = {}
-    for s in snapshots:
-        d_str = parse_timestamp(s["timestamp"]).strftime('%d.%m.%Y')
-        date_counts[d_str] = date_counts.get(d_str, 0) + 1
-        
-    date_seen = {}
-    for s in snapshots:
-        dt = parse_timestamp(s["timestamp"])
-        d_str = dt.strftime('%d.%m.%Y')
-        status_label = get_status_label(s["timestamp"])
-        
-        if date_counts[d_str] > 1:
-            date_seen[d_str] = date_seen.get(d_str, 0) + 1
-            label = f"{d_str} ({date_seen[d_str]}) — {status_label}"
-        else:
-            label = f"{d_str} — {status_label}"
-            
-        opt = {"label": label, "timestamp": s["timestamp"], "path": s["path"]}
-        if not is_comp:
-            opt["datetime"] = s["datetime"]
-        options.append(opt)
+    for key in sorted(groups.keys(), reverse=True):
+        dt = parse_timestamp(key)
+        if dt != datetime.min:
+            label = f"{dt.strftime('%d.%m.%Y %H:%M')}"
+            options.append({"label": label, "key": key, "paths": groups[key]})
     return options
 
 st.sidebar.markdown("---")
 
 st.sidebar.header("Период (→ PREV-BR)")
-week_labels = [weeks[k]["label"] for k in week_keys]
-selected_week_label = st.sidebar.selectbox("Неделя", week_labels, index=0, label_visibility="collapsed")
-selected_week_key = week_keys[week_labels.index(selected_week_label)]
+group_options = build_group_options(snapshot_groups)
+group_labels = [o["label"] for o in group_options]
 
-week_snapshots = weeks[selected_week_key]["snapshots"]
-week_snapshots.sort(key=lambda x: x["datetime"], reverse=True)
-
-snapshot_options = build_options(week_snapshots)
-
-def _pick_default_snapshot(snaps):
-    pre = [s for s in snaps if get_status(s["timestamp"]) == PRE_BR]
-    if pre: return pre[0]
-    drafts = [s for s in snaps if get_status(s["timestamp"]) == DRAFT]
-    if drafts: return drafts[0]
-    return snaps[0]
-
-default_snap = _pick_default_snapshot(week_snapshots)
-default_index = next((i for i, opt in enumerate(snapshot_options) if opt["timestamp"] == default_snap["timestamp"]), 0)
-
-selected_snapshot_label = st.sidebar.selectbox("Отчет", [opt["label"] for opt in snapshot_options], index=default_index, label_visibility="collapsed")
-selected_snapshot = next(opt for opt in snapshot_options if opt["label"] == selected_snapshot_label)
-selected_date = selected_snapshot["timestamp"]
+selected_group_label = st.sidebar.selectbox("Неделя", group_labels, index=0, label_visibility="collapsed")
+selected_group = next(o for o in group_options if o["label"] == selected_group_label)
 
 st.sidebar.markdown("---")
 
 st.sidebar.header("Статус версии")
-current_status = get_status(selected_date)
-current_label = get_status_label(selected_date)
+current_status = get_status(selected_group["key"])
+current_label = get_status_label(selected_group["key"])
 
 if current_status == BR:
     st.sidebar.success(f"Статус: {current_label}")
@@ -192,50 +180,47 @@ col_s1, col_s2 = st.sidebar.columns(2)
 btn_pre_br_disabled = (current_status != DRAFT)
 with col_s1:
     if st.button("Пред-BR", width="stretch", disabled=btn_pre_br_disabled):
-        set_status(selected_date, PRE_BR)
+        set_status(selected_group["key"], PRE_BR)
         st.rerun()
 
 btn_br_disabled = (current_status != PRE_BR)
 with col_s2:
     if st.button("BR", width="stretch", disabled=btn_br_disabled):
         try:
-            for s in week_snapshots:
-                if s["timestamp"] != selected_date and get_status(s["timestamp"]) == BR:
-                    set_status(s["timestamp"], PRE_BR)
-            prev_date = get_last_br_before(selected_date)
-            if prev_date and prev_date != selected_date:
+            for o in group_options:
+                if o["key"] != selected_group["key"] and get_status(o["key"]) == BR:
+                    set_status(o["key"], PRE_BR)
+            prev_date = get_last_br_before(selected_group["key"])
+            if prev_date and prev_date != selected_group["key"]:
                 set_status(prev_date, PRE_BR)
         except Exception:
             pass
-        set_status(selected_date, BR)
+        set_status(selected_group["key"], BR)
         st.rerun()
 
 btn_draft_disabled = (current_status != PRE_BR)
 if current_status != BR:
     if st.sidebar.button("Снять статус (Черновик)", width="stretch", disabled=btn_draft_disabled):
-        set_status(selected_date, DRAFT)
+        set_status(selected_group["key"], DRAFT)
         st.rerun()
 
 st.sidebar.markdown("---")
 
-prev_br_date = get_last_br_before(selected_date)
-comparison_snapshot = None
-comparison_deals = None
+prev_br_date = get_last_br_before(selected_group["key"])
+comparison_data = None
 
 if prev_br_date:
-    for s in all_snapshots:
-        if s["timestamp"] == prev_br_date:
-            comparison_snapshot = {"timestamp": s["timestamp"], "path": s["path"]}
+    for o in group_options:
+        if o["key"] == prev_br_date:
             try:
-                comp_data = load_snapshot(comparison_snapshot["path"])
-                comparison_deals = comp_data["deals"]
+                comparison_data = load_all_snapshots(tuple(o["paths"]))
             except Exception as e:
-                st.sidebar.warning(f"Ошибка загрузки сделок для сравнения: {e}")
+                st.sidebar.warning(f"Ошибка загрузки данных для сравнения: {e}")
             break
 
 st.sidebar.markdown("**Актуальный прогноз**")
-if comparison_snapshot:
-    comp_dt = parse_timestamp(comparison_snapshot["timestamp"]).strftime('%d.%m.%Y')
+if comparison_data:
+    comp_dt = parse_timestamp(prev_br_date).strftime('%d.%m.%Y')
     st.sidebar.caption(f"Сравнение с BR от {comp_dt}")
 else:
     st.sidebar.caption("Нет предыдущего BR для сравнения")
@@ -244,16 +229,15 @@ st.sidebar.markdown("---")
 
 st.sidebar.header("Фильтры")
 try:
-    data = load_snapshot(selected_snapshot["path"])
+    data = load_all_snapshots(tuple(selected_group["paths"]))
 except Exception as e:
     st.error(f"Ошибка чтения: {e}")
     st.stop()
 
 # ============================================================
-# АВТОПЕРЕИМЕНОВАНИЕ КОЛОНОК (УМНЫЙ ПАРСЕР)
+# АВТОПЕРЕИМЕНОВАНИЕ КОЛОНОК
 # ============================================================
 rename_dict = {
-    # Сделки
     "ID": "ID_сделки",
     "ID сделки": "ID_сделки",
     "Номер сделки": "ID_сделки",
@@ -267,8 +251,6 @@ rename_dict = {
     "Тип предложения": "Тип_сделки",
     "Статус сделки": "Статус",
     "Туалет": "Статус",
-    
-    # Выручка
     "Бюджет": "Выручка_бюджет",
     "План": "Выручка_бюджет",
     "Факт": "Выручка_факт",
@@ -277,18 +259,14 @@ rename_dict = {
     "Backlog": "Выручка_Backlog",
     "Pipeline": "Выручка_Pipeline",
     "Extra GAP": "Выручка_Extra_GAP",
-    
-    # SGA
     "SGA_план": "SGA_бюджет",
     "SGA_факт": "SGA_факт",
     "SGA_прогноз": "SGA_прогноз",
 }
 
-# Применяем переименование ко всем листам
 for df_name in ["deals", "revenue", "direct", "sga"]:
     if df_name in data:
         df = data[df_name]
-        # Переименовываем только те колонки, которые есть в нашем словаре
         df = df.rename(columns={k: v for k, v in rename_dict.items() if k in df.columns})
         data[df_name] = df
 # ============================================================
@@ -306,7 +284,8 @@ if selected_by != "Все":
     dr = direct[direct["БЮ"] == selected_by]
     deals_filtered = deals[deals["БЮ"] == selected_by]
     
-    if comparison_deals is not None:
+    if comparison_data is not None:
+        comparison_deals = comparison_data["deals"]
         comparison_deals = comparison_deals[comparison_deals["БЮ"] == selected_by]
 else:
     rev = revenue
@@ -323,9 +302,9 @@ if page == "Сделки":
     from page_deals import render_deals_page
     render_deals_page(
         deals=deals_filtered,
-        comparison_deals=comparison_deals,
+        comparison_deals=comparison_deals if comparison_data else None,
         selected_by=selected_by,
-        selected_date=selected_date,
+        selected_date=selected_group["key"],
         fmt_num=fmt_num,
         fmt_pct=fmt_pct,
     )
@@ -340,12 +319,11 @@ dr_totals = agg(dr, ["StaffCost_бюджет", "StaffCost_prev", "StaffCost_фа
                      "COGS_бюджет", "COGS_prev", "COGS_факт", "COGS_прогноз"])
 sga_totals = agg(sg, ["SGA_бюджет", "SGA_prev", "SGA_факт", "SGA_прогноз"])
 
-if comparison_snapshot:
+if comparison_data:
     try:
-        comp_data = load_snapshot(comparison_snapshot["path"])
-        c_rev = comp_data["revenue"]
-        c_dr = comp_data["direct"]
-        c_sga = comp_data["sga"]
+        c_rev = comparison_data["revenue"]
+        c_dr = comparison_data["direct"]
+        c_sga = comparison_data["sga"]
         if selected_by != "Все":
             c_rev = c_rev[c_rev["БЮ"] == selected_by]
             c_dr = c_dr[c_dr["БЮ"] == selected_by]
@@ -372,7 +350,7 @@ if comparison_snapshot:
         
     except Exception as e:
         st.warning(f"Не удалось загрузить данные для сравнения: {e}")
-        comparison_snapshot = None
+        comparison_data = None
 
 def sum_direct(prefix):
     return dr_totals[f"StaffCost_{prefix}"] + dr_totals[f"COGS_{prefix}"]
@@ -388,14 +366,14 @@ def gm_pct(prefix):
     return (gp3(prefix) / rev_val * 100) if rev_val else 0
 
 st.title("Управленческая отчётность")
-dt_str = parse_timestamp(selected_date).strftime("%d.%m.%Y %H:%M")
+dt_str = parse_timestamp(selected_group["key"]).strftime("%d.%m.%Y %H:%M")
 st.caption(f"Отчёт от {dt_str} | БЮ: {selected_by} | Единицы: тыс. руб.")
 st.markdown("---")
 
 st.subheader("P&L по статьям")
 
-if comparison_snapshot:
-    comp_dt = parse_timestamp(comparison_snapshot["timestamp"]).strftime('%d.%m.%Y')
+if comparison_data:
+    comp_dt = parse_timestamp(prev_br_date).strftime('%d.%m.%Y')
     st.caption(f"**Режим сравнения:** показатели колонки `Прогноз` сравниваются с отчетом от **{comp_dt}**. Разница отображена в колонке `Δ Prev. BR`.")
 else:
     st.caption("Кликните на строку Backlog / Pipeline / Extra GAP, чтобы открыть детализацию по сделкам. Сравнение не выбрано, данные в колонке `Prev. BR` — базовые (из файла).")
@@ -421,7 +399,7 @@ def make_row(name, b, p, f, pr, indent=False):
         "Прогноз": pr,
     }
 
-if comparison_snapshot:
+if comparison_data:
     r_backlog_p = comp_rev_backlog
     r_pipeline_p = comp_rev_pipeline
     r_gap_p = comp_rev_gap
@@ -518,7 +496,7 @@ total_pr_val = rev_totals["Выручка_прогноз"] + sum_direct("про�
 total_row = {
     "Показатель": "ИТОГО (ключевые)",
     "Бюджет": total_budget,
-    "Prev. BR": comp_total_all if comparison_snapshot else total_prev,
+    "Prev. BR": comp_total_all if comparison_data else total_prev,
     "Q1": total_pr_val / 4,
     "Q2": total_pr_val / 4,
     "Q3": total_pr_val / 4,
@@ -527,8 +505,8 @@ total_row = {
     "Прогноз": total_pr_val,
     "Δ бюджет": total_pr_val - total_budget,
     "Δ бюджет, %": round(((total_pr_val - total_budget) / total_budget * 100) if total_budget else 0, 1),
-    "Δ Prev. BR": total_pr_val - (comp_total_all if comparison_snapshot else total_prev),
-    "Δ Prev. BR, %": round(((total_pr_val - (comp_total_all if comparison_snapshot else total_prev)) / (comp_total_all if comparison_snapshot else total_prev) * 100) if (comp_total_all if comparison_snapshot else total_prev) else 0, 1),
+    "Δ Prev. BR": total_pr_val - (comp_total_all if comparison_data else total_prev),
+    "Δ Prev. BR, %": round(((total_pr_val - (comp_total_all if comparison_data else total_prev)) / (comp_total_all if comparison_data else total_prev) * 100) if (comp_total_all if comparison_data else total_prev) else 0, 1),
 }
 
 table_data.append(total_row)
