@@ -3,6 +3,7 @@ import pandas as pd
 import io
 import requests
 import glob
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -23,10 +24,19 @@ def get_all_excel_files():
     headers = {"Authorization": f"OAuth {YANDEX_TOKEN}"}
     
     params = {"path": FOLDER_PATH, "limit": 100}
-    response = requests.get(url, headers=headers, params=params)
     
-    if response.status_code != 200:
-        raise Exception(f"Ошибка доступа к Яндекс.Диску: {response.text}")
+    # Делаем несколько попыток получить список файлов
+    response = None
+    for attempt in range(3):
+        try:
+            response = requests.get(url, headers=headers, params=params, timeout=30)
+            if response.status_code == 200:
+                break
+        except Exception as e:
+            time.sleep(2)
+    
+    if not response or response.status_code != 200:
+        raise Exception(f"Ошибка доступа к Яндекс.Диску: {response.text if response else 'Нет ответа'}")
     
     items = response.json().get("_embedded", {}).get("items", [])
     excel_files = [i for i in items if i["name"].endswith(".xlsx") and i["type"] == "file"]
@@ -39,17 +49,32 @@ def get_all_excel_files():
     
     for f in excel_files:
         download_url = f["file"]
-        file_response = requests.get(download_url, headers=headers)
         
-        if file_response.status_code == 200:
-            # Сохраняем файл с оригинальным именем + дата
-            base_name = Path(f["name"]).stem
-            new_path = SNAPSHOTS_DIR / f"{now_str}_{base_name}.xlsx"
-            
-            with open(new_path, "wb") as file:
-                file.write(file_response.content)
-            
-            downloaded.append(f["name"])
+        # Делаем несколько попыток скачать каждый файл
+        success = False
+        for attempt in range(3):
+            try:
+                file_response = requests.get(download_url, headers=headers, timeout=60)
+                if file_response.status_code == 200:
+                    base_name = Path(f["name"]).stem
+                    new_path = SNAPSHOTS_DIR / f"{now_str}_{base_name}.xlsx"
+                    
+                    with open(new_path, "wb") as file:
+                        file.write(file_response.content)
+                    
+                    downloaded.append(f["name"])
+                    success = True
+                    break
+                else:
+                    time.sleep(2)
+            except Exception:
+                time.sleep(2)
+        
+        if not success:
+            raise Exception(f"Не удалось скачать файл: {f['name']}")
+        
+        # Пауза между скачиваниями, чтобы Яндекс не блокировал
+        time.sleep(1)
     
     return downloaded
 
