@@ -213,7 +213,7 @@ with col_s2:
                     set_status(o["key"], PRE_BR)
             prev_date = get_last_br_before(selected_group["key"])
             if prev_date and prev_date != selected_group["key"]:
-                set_status(prev_date, PRE_BR)
+                st.set_status(prev_date, PRE_BR)
         except Exception:
             pass
         set_status(selected_group["key"], BR)
@@ -280,7 +280,7 @@ if page == "Сделки":
     from page_deals import render_deals_page
     render_deals_page(
         deals=rev,
-        comparison_deals=None,
+        comparison_deals=comparison_data["revenue"] if comparison_data else None,
         selected_by=selected_by,
         selected_date=selected_group["key"],
         fmt_num=fmt_num,
@@ -337,6 +337,7 @@ sga_totals = {
     "SGA_бюджет": 0, "SGA_prev": 0, "SGA_факт": 0, "SGA_прогноз": 0,
 }
 
+# --- СЧИТАЕМ ДАННЫЕ ДЛЯ ПРЕДЫДУЩЕГО BR ---
 if comparison_data:
     comp_rev = comparison_data["revenue"]
     comp_staff = comparison_data["staff"]
@@ -344,19 +345,36 @@ if comparison_data:
         comp_rev = comp_rev[comp_rev["SBU"] == selected_by]
         comp_staff = comp_staff[comp_staff["SBU"] == selected_by]
 
-    comp_rev_prev = 0
+    comp_rev_total = 0
+    comp_rev_backlog = 0
+    comp_rev_pipeline = 0
+    comp_rev_gap = 0
     for _, row in comp_rev.iterrows():
         qty = row.get("Вероятность", 0) / 100.0
         total = row.get("Q1", 0) + row.get("Q2", 0) + row.get("Q3", 0) + row.get("Q4", 0)
-        comp_rev_prev += total * qty
+        val = total * qty
+        comp_rev_total += val
+        deal_type = str(row.get("Тип_сделки", "")).strip()
+        if deal_type == "Backlog":
+            comp_rev_backlog += val
+        elif deal_type == "Pipeline":
+            comp_rev_pipeline += val
+        elif deal_type == "GAP":
+            comp_rev_gap += val
 
-    comp_staff_prev = 0
+    comp_staff_total = 0
+    comp_cogs_total = 0
     for _, row in comp_staff.iterrows():
         total = row.get("Q1", 0) + row.get("Q2", 0) + row.get("Q3", 0) + row.get("Q4", 0)
-        comp_staff_prev += total
+        article = str(row.get("Статья_затрат", "")).strip()
+        if "ФОТ" in article or "Премии" in article:
+            comp_staff_total += total
+        else:
+            comp_cogs_total += total
 
-    rev_totals["Выручка_prev"] = comp_rev_prev
-    staff_totals["StaffCost_prev"] = comp_staff_prev
+    rev_totals["Выручка_prev"] = comp_rev_total
+    staff_totals["StaffCost_prev"] = comp_staff_total
+    staff_totals["COGS_prev"] = comp_cogs_total
 
 def sum_direct(prefix):
     return staff_totals[f"StaffCost_{prefix}"] + staff_totals[f"COGS_{prefix}"]
@@ -405,14 +423,14 @@ def make_row(name, b, p, f, pr, indent=False):
     }
 
 if comparison_data:
-    r_backlog_p = 0
-    r_pipeline_p = 0
-    r_gap_p = 0
-    r_total_p = rev_totals["Выручка_prev"]
-    d_total_p = staff_totals["StaffCost_prev"]
-    d_staff_p = staff_totals["StaffCost_prev"]
-    d_cogs_p = staff_totals["COGS_prev"]
-    gp3_p = r_total_p - d_total_p
+    r_backlog_p = comp_rev_backlog
+    r_pipeline_p = comp_rev_pipeline
+    r_gap_p = comp_rev_gap
+    r_total_p = comp_rev_total
+    d_staff_p = comp_staff_total
+    d_cogs_p = comp_cogs_total
+    d_total_p = comp_staff_total + comp_cogs_total
+    gp3_p = comp_rev_total - d_total_p
     sga_p = 0
     ebitda_p = gp3_p - sga_p
 else:
