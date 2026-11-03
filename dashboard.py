@@ -213,7 +213,7 @@ with col_s2:
                     set_status(o["key"], PRE_BR)
             prev_date = get_last_br_before(selected_group["key"])
             if prev_date and prev_date != selected_group["key"]:
-                st.set_status(prev_date, PRE_BR)
+                set_status(prev_date, PRE_BR)
         except Exception:
             pass
         set_status(selected_group["key"], BR)
@@ -860,11 +860,21 @@ if week_dyn:
             tickmode="array", 
             tickvals=dyn_df["Неделя"], 
             ticktext=dyn_df["Неделя"]
+        ),
+        yaxis=dict(
+            tickformat="~s"  # <--- Форматирование оси Y (например, 43M)
         )
     )
     st.plotly_chart(fig_dyn, width="stretch")
 
+    # --- [FIX] Форматируем числа в таблице "Показать данные по неделям" ---
     with st.expander("Показать данные по неделям"):
         display_df = dyn_df.copy()
+        
+        # Форматируем все числовые колонки
+        for col in display_df.columns:
+            if col != "Неделя":
+                display_df[col] = display_df[col].apply(lambda v: fmt_num(v, 0))
+        
         styler = display_df.style.apply(zebra_style, axis=None).hide(axis="index")
         st.dataframe(styler, width="stretch", height=350)
