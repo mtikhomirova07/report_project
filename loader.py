@@ -18,6 +18,18 @@ YANDEX_TOKEN = "y0__wgBENmAzqeq94ACGKe9TiD99KHQGUiTOezfAC1bXzcTrARWQ753zG3n"
 
 FOLDER_PATH = "/reports"
 
+def download_file_with_retry(url, headers, max_retries=3):
+    """Скачивает файл с повторными попытками."""
+    for attempt in range(max_retries):
+        try:
+            response = requests.get(url, headers=headers, timeout=60)
+            if response.status_code == 200:
+                return response.content
+            time.sleep(2)
+        except Exception:
+            time.sleep(2)
+    return None
+
 def get_all_excel_files():
     """Скачивает все Excel-файлы из папок на Яндекс.Диске."""
     url = "https://cloud-api.yandex.net/v1/disk/resources"
@@ -25,6 +37,7 @@ def get_all_excel_files():
     
     params = {"path": FOLDER_PATH, "limit": 1000}
     
+    # Получаем список папок (с повторными попытками)
     response = None
     for attempt in range(3):
         try:
@@ -38,21 +51,18 @@ def get_all_excel_files():
         raise Exception(f"Ошибка доступа к Яндекс.Диску: {response.text if response else 'Нет ответа'}")
     
     items = response.json().get("_embedded", {}).get("items", [])
-    
-    # Разделяем на папки и файлы
     folders = [i for i in items if i["type"] == "dir"]
     
     downloaded = []
     now_str = datetime.now().strftime("%Y-%m-%d_%H%M")
     
-    # Если есть папки — проходим по каждой
     if folders:
         for folder in folders:
             folder_name = folder["name"]
             folder_url = "https://cloud-api.yandex.net/v1/disk/resources"
             folder_params = {"path": folder["path"], "limit": 100}
             
-            folder_response = requests.get(folder_url, headers=headers, params=folder_params)
+            folder_response = requests.get(folder_url, headers=headers, params=folder_params, timeout=30)
             if folder_response.status_code != 200:
                 continue
             
@@ -61,30 +71,34 @@ def get_all_excel_files():
             
             for f in folder_files:
                 download_url = f["file"]
-                file_response = requests.get(download_url, headers=headers, timeout=60)
-                if file_response.status_code == 200:
+                content = download_file_with_retry(download_url, headers)
+                
+                if content:
                     base_name = Path(f["name"]).stem
                     new_path = SNAPSHOTS_DIR / f"{now_str}_{folder_name}_{base_name}.xlsx"
                     
                     with open(new_path, "wb") as file:
-                        file.write(file_response.content)
+                        file.write(content)
                     
                     downloaded.append(f"{folder_name}/{f['name']}")
+                
+                # Пауза между файлами, чтобы Яндекс не блокировал
                 time.sleep(1)
     else:
-        # Если папок нет — качаем файлы из корня (старая логика)
         files = [i for i in items if i["name"].endswith(".xlsx") and i["type"] == "file"]
         for f in files:
             download_url = f["file"]
-            file_response = requests.get(download_url, headers=headers, timeout=60)
-            if file_response.status_code == 200:
+            content = download_file_with_retry(download_url, headers)
+            
+            if content:
                 base_name = Path(f["name"]).stem
                 new_path = SNAPSHOTS_DIR / f"{now_str}_{base_name}.xlsx"
                 
                 with open(new_path, "wb") as file:
-                    file.write(file_response.content)
+                    file.write(content)
                 
                 downloaded.append(f["name"])
+            
             time.sleep(1)
     
     if not downloaded:
