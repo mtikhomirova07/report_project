@@ -56,7 +56,6 @@ FONT_BOLD = FONT_DIR / "DejaVuSans-Bold.ttf"
 
 def parse_timestamp(ts):
     try:
-        # Ищем дату в формате YYYY-MM-DD_HHMM в любом месте строки
         match = re.search(r"(\d{4}-\d{2}-\d{2}_\d{4})", ts)
         if match:
             return datetime.strptime(match.group(1), "%Y-%m-%d_%H%M")
@@ -119,7 +118,6 @@ if not snapshot_files:
 snapshot_groups = {}
 for f in snapshot_files:
     stem = Path(f).stem
-    # Ищем ключ группы: папка недели (2026-W44) или дата
     week_match = re.search(r"(2026-W\d+)", stem)
     date_match = re.search(r"(\d{4}-\d{2}-\d{2}_\d{4})", stem)
     
@@ -138,7 +136,6 @@ group_keys = sorted(snapshot_groups.keys(), reverse=True)
 
 @st.cache_data
 def load_all_snapshots(paths):
-    """Загружает все файлы из группы и объединяет их."""
     all_revenue = []
     all_staff = []
 
@@ -166,7 +163,6 @@ def load_all_snapshots(paths):
 def build_group_options(groups):
     options = []
     for key in sorted(groups.keys(), reverse=True):
-        # Если ключ — это неделя (2026-W44), показываем её. Если дата — тоже показываем.
         if key.startswith("2026-W"):
             label = key
         else:
@@ -562,20 +558,20 @@ function(params) {
 
 gb = GridOptionsBuilder.from_dataframe(display_table)
 gb.configure_default_column(resizable=True, sortable=True, filterable=False)
-gb.configure_column("Показатель", width=220, pinned="left", cellStyle={"textAlign": "left"})
+gb.configure_column("Показатель", width=200, pinned="left", cellStyle={"textAlign": "left"})
 
 num_style = {"textAlign": "right", "fontFamily": "monospace"}
-gb.configure_column("Бюджет", width=90, cellStyle=num_style)
-gb.configure_column("Prev. BR", width=90, cellStyle={**num_style, "backgroundColor": "#f4f6f8"})
-gb.configure_column("Q1", width=70, cellStyle=num_style)
-gb.configure_column("Q2", width=70, cellStyle=num_style)
-gb.configure_column("Q3", width=70, cellStyle=num_style)
-gb.configure_column("Q4", width=70, cellStyle=num_style)
-gb.configure_column("Факт YTD", width=90, cellStyle=num_style)
-gb.configure_column("Прогноз", width=90, cellStyle=num_style)
+gb.configure_column("Бюджет", width=110, cellStyle=num_style)
+gb.configure_column("Prev. BR", width=110, cellStyle={**num_style, "backgroundColor": "#f4f6f8"})
+gb.configure_column("Q1", width=90, cellStyle=num_style)
+gb.configure_column("Q2", width=90, cellStyle=num_style)
+gb.configure_column("Q3", width=90, cellStyle=num_style)
+gb.configure_column("Q4", width=90, cellStyle=num_style)
+gb.configure_column("Факт YTD", width=110, cellStyle=num_style)
+gb.configure_column("Прогноз", width=110, cellStyle=num_style)
 
 for col in ["Δ бюджет", "Δ бюджет, %", "Δ Prev. BR", "Δ Prev. BR, %"]:
-    gb.configure_column(col, width=100, cellStyle=_STYLE_JS)
+    gb.configure_column(col, width=120, cellStyle=_STYLE_JS)
 
 gb.configure_selection(selection_mode="single", use_checkbox=False)
 grid_options = gb.build()
