@@ -55,8 +55,13 @@ FONT_BOLD = FONT_DIR / "DejaVuSans-Bold.ttf"
 
 def parse_timestamp(ts):
     try:
-        return datetime.strptime(ts[:15], "%Y-%m-%d_%H%M")
-    except ValueError:
+        # Ищем дату в формате YYYY-MM-DD_HHMM в любом месте строки
+        import re
+        match = re.search(r"(\d{4}-\d{2}-\d{2}_\d{4})", ts)
+        if match:
+            return datetime.strptime(match.group(1), "%Y-%m-%d_%H%M")
+        return datetime.min
+    except Exception:
         return datetime.min
 
 def get_week_label(dt):
@@ -99,7 +104,18 @@ if not snapshot_files:
 snapshot_groups = {}
 for f in snapshot_files:
     stem = Path(f).stem
-    key = stem[:15]
+    # Ищем ключ группы: дата + название папки недели (если есть)
+    import re
+    date_match = re.search(r"(\d{4}-\d{2}-\d{2}_\d{4})", stem)
+    week_match = re.search(r"(2026-W\d+)", stem)
+    
+    if date_match and week_match:
+        key = f"{week_match.group(1)}_{date_match.group(1)}"
+    elif date_match:
+        key = date_match.group(1)
+    else:
+        key = stem
+    
     if key not in snapshot_groups:
         snapshot_groups[key] = []
     snapshot_groups[key].append(f)
