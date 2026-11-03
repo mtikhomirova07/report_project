@@ -55,7 +55,6 @@ FONT_BOLD = FONT_DIR / "DejaVuSans-Bold.ttf"
 
 def parse_timestamp(ts):
     try:
-        # Обрезаем до 15 символов (YYYY-MM-DD_HHMM), чтобы отбросить имя файла
         return datetime.strptime(ts[:15], "%Y-%m-%d_%H%M")
     except ValueError:
         return datetime.min
@@ -96,11 +95,11 @@ if not snapshot_files:
     st.error("Нет снимков. Нажмите «Обновить данные».")
     st.stop()
 
-# Группируем файлы по времени загрузки (YYYY-MM-DD_HHMM)
+# Группируем файлы по времени загрузки
 snapshot_groups = {}
 for f in snapshot_files:
     stem = Path(f).stem
-    key = stem[:15]  # Берем только дату и время
+    key = stem[:15]
     if key not in snapshot_groups:
         snapshot_groups[key] = []
     snapshot_groups[key].append(f)
@@ -120,25 +119,42 @@ def load_all_snapshots(paths):
             xls = pd.ExcelFile(path)
             sheet_names = xls.sheet_names
             
-            # Ищем листы по названиям (с учетом возможных вариантов)
-            deals_sheet = next((s for s in sheet_names if s.lower() in ["сделки", "deals", "rev_ea_crm", "rev_corp"]), None)
-            revenue_sheet = next((s for s in sheet_names if s.lower() in ["выручка", "revenue"]), None)
-            direct_sheet = next((s for s in sheet_names if s.lower() in ["прямые расходы", "direct", "staff", "staff ea crm"]), None)
-            sga_sheet = next((s for s in sheet_names if s.lower() in ["sga"]), None)
-
-            if deals_sheet:
-                all_deals.append(pd.read_excel(path, sheet_name=deals_sheet))
-            if revenue_sheet:
-                all_revenue.append(pd.read_excel(path, sheet_name=revenue_sheet))
-            if direct_sheet:
-                all_direct.append(pd.read_excel(path, sheet_name=direct_sheet))
-            if sga_sheet:
-                all_sga.append(pd.read_excel(path, sheet_name=sga_sheet))
+            for sheet in sheet_names:
+                if sheet.startswith("Rev_"):
+                    df = pd.read_excel(path, sheet_name=sheet)
+                    df = df.rename(columns={
+                        "SBU": "БЮ",
+                        "Название проекта/сделки": "Заказчик",
+                        "Признак ХТ": "Менеджер",
+                        "Backlog / Pipeline": "Тип_сделки",
+                    })
+                    # Сумма по кварталам
+                    q_cols = [c for c in df.columns if c in ["Q1", "Q2", "Q3", "Q4"]]
+                    if q_cols:
+                        df["Сумма_сделки"] = df[q_cols].sum(axis=1)
+                    all_revenue.append(df)
+                    
+                elif sheet.startswith("Staff_"):
+                    df = pd.read_excel(path, sheet_name=sheet)
+                    df = df.rename(columns={
+                        "SBU": "БЮ",
+                        "ФИО или Описание группы персонала или вакансии": "Сотрудник",
+                        "Admin / Проектная команда": "Роль",
+                        "Признак ХТ": "Менеджер",
+                    })
+                    q_cols = [c for c in df.columns if c in ["Q1", "Q2", "Q3", "Q4"]]
+                    if q_cols:
+                        df["Сумма_затрат"] = df[q_cols].sum(axis=1)
+                    all_direct.append(df)
+                    
+                elif sheet == "SGA":
+                    df = pd.read_excel(path, sheet_name=sheet)
+                    all_sga.append(df)
+                    
         except Exception as e:
             st.warning(f"Ошибка чтения файла {path}: {e}")
 
     return {
-        "deals": pd.concat(all_deals, ignore_index=True) if all_deals else pd.DataFrame(),
         "revenue": pd.concat(all_revenue, ignore_index=True) if all_revenue else pd.DataFrame(),
         "direct": pd.concat(all_direct, ignore_index=True) if all_direct else pd.DataFrame(),
         "sga": pd.concat(all_sga, ignore_index=True) if all_sga else pd.DataFrame(),
@@ -234,63 +250,23 @@ except Exception as e:
     st.error(f"Ошибка чтения: {e}")
     st.stop()
 
-# ============================================================
-# АВТОПЕРЕИМЕНОВАНИЕ КОЛОНОК
-# ============================================================
-rename_dict = {
-    "ID": "ID_сделки",
-    "ID сделки": "ID_сделки",
-    "Номер сделки": "ID_сделки",
-    "Менеджер проекта": "Менеджер",
-    "Ответственный": "Менеджер",
-    "Сумма": "Сумма_сделки",
-    "Сумма сделки": "Сумма_сделки",
-    "Вероятность сделки": "Вероятность",
-    "Вероятность закрытия": "Вероятность",
-    "Тип": "Тип_сделки",
-    "Тип предложения": "Тип_сделки",
-    "Статус сделки": "Статус",
-    "Туалет": "Статус",
-    "Бюджет": "Выручка_бюджет",
-    "План": "Выручка_бюджет",
-    "Факт": "Выручка_факт",
-    "Прогноз": "Выручка_прогноз",
-    "Prev. BR": "Выручка_prev",
-    "Backlog": "Выручка_Backlog",
-    "Pipeline": "Выручка_Pipeline",
-    "Extra GAP": "Выручка_Extra_GAP",
-    "SGA_план": "SGA_бюджет",
-    "SGA_факт": "SGA_факт",
-    "SGA_прогноз": "SGA_прогноз",
-}
-
-for df_name in ["deals", "revenue", "direct", "sga"]:
-    if df_name in data:
-        df = data[df_name]
-        df = df.rename(columns={k: v for k, v in rename_dict.items() if k in df.columns})
-        data[df_name] = df
-# ============================================================
-
-deals = data["deals"]
 revenue = data["revenue"]
 direct = data["direct"]
 sga = data["sga"]
 
-by_list = ["Все"] + sorted(revenue["БЮ"].unique().tolist())
+if revenue.empty:
+    st.error("В загруженных файлах не найдены данные по выручке (листы Rev_*). Проверьте структуру файлов.")
+    st.stop()
+
+by_list = ["Все"] + sorted(revenue["БЮ"].dropna().unique().tolist())
 selected_by = st.sidebar.selectbox("Бизнес-юнит (БЮ)", by_list)
 
 if selected_by != "Все":
     rev = revenue[revenue["БЮ"] == selected_by]
     dr = direct[direct["БЮ"] == selected_by]
-    deals_filtered = deals[deals["БЮ"] == selected_by]
-    
-    if comparison_data is not None:
-        comparison_deals = comparison_data["deals"]
-        comparison_deals = comparison_deals[comparison_deals["БЮ"] == selected_by]
 else:
     rev = revenue
     dr = direct
-    deals_filtered = deals
 sg = sga
 
 st.sidebar.markdown("---")
@@ -301,8 +277,8 @@ page = st.sidebar.radio("Страница", ["P&L", "Сделки"], key="page_n
 if page == "Сделки":
     from page_deals import render_deals_page
     render_deals_page(
-        deals=deals_filtered,
-        comparison_deals=comparison_deals if comparison_data else None,
+        deals=rev,
+        comparison_deals=None,
         selected_by=selected_by,
         selected_date=selected_group["key"],
         fmt_num=fmt_num,
@@ -313,6 +289,9 @@ if page == "Сделки":
 # ============================================================
 # СТРАНИЦА: P&L
 # ============================================================
+def agg(df, cols):
+    return {c: df[c].sum() if c in df.columns else 0 for c in cols}
+
 rev_totals = agg(rev, ["Выручка_бюджет", "Выручка_prev", "Выручка_факт", "Выручка_прогноз",
                        "Выручка_Backlog", "Выручка_Pipeline", "Выручка_Extra_GAP"])
 dr_totals = agg(dr, ["StaffCost_бюджет", "StaffCost_prev", "StaffCost_факт", "StaffCost_прогноз",
@@ -327,27 +306,27 @@ if comparison_data:
         if selected_by != "Все":
             c_rev = c_rev[c_rev["БЮ"] == selected_by]
             c_dr = c_dr[c_dr["БЮ"] == selected_by]
-            
+
         c_rev_totals = agg(c_rev, ["Выручка_прогноз", "Выручка_Backlog", "Выручка_Pipeline", "Выручка_Extra_GAP"])
         c_dr_totals = agg(c_dr, ["StaffCost_прогноз", "COGS_прогноз"])
         c_sga_totals = agg(c_sga, ["SGA_прогноз"])
-        
+
         comp_rev_total = c_rev_totals["Выручка_прогноз"]
         comp_rev_backlog = c_rev_totals["Выручка_Backlog"]
         comp_rev_pipeline = c_rev_totals["Выручка_Pipeline"]
         comp_rev_gap = c_rev_totals["Выручка_Extra_GAP"]
-        
+
         comp_staff = c_dr_totals["StaffCost_прогноз"]
         comp_cogs = c_dr_totals["COGS_прогноз"]
         comp_dr_total = comp_staff + comp_cogs
-        
+
         comp_sga_total = c_sga_totals["SGA_прогноз"]
-        
+
         comp_gp3 = comp_rev_total - comp_dr_total
         comp_ebitda = comp_gp3 - comp_sga_total
-        
+
         comp_total_all = comp_rev_total + comp_dr_total + comp_sga_total
-        
+
     except Exception as e:
         st.warning(f"Не удалось загрузить данные для сравнения: {e}")
         comparison_data = None
@@ -605,7 +584,6 @@ with pd.ExcelWriter(buffer_excel, engine="openpyxl") as writer:
     rev.to_excel(writer, sheet_name="Выручка", index=False)
     dr.to_excel(writer, sheet_name="Прямые", index=False)
     sg.to_excel(writer, sheet_name="SGA", index=False)
-    deals_filtered.to_excel(writer, sheet_name="Сделки", index=False)
 
 buffer_pdf = io.BytesIO()
 pdf_generated = False
@@ -648,10 +626,10 @@ except Exception as e:
 
 col_dl1, col_dl2 = st.columns(2)
 with col_dl1:
-    st.download_button("Скачать отчёт в Excel", data=buffer_excel.getvalue(), file_name=f"report_{selected_date}.xlsx", width="stretch")
+    st.download_button("Скачать отчёт в Excel", data=buffer_excel.getvalue(), file_name=f"report_{selected_group['key']}.xlsx", width="stretch")
 with col_dl2:
     if pdf_generated:
-        st.download_button("Скачать отчёт в PDF", data=buffer_pdf.getvalue(), file_name=f"report_{selected_date}.pdf", width="stretch", mime="application/pdf")
+        st.download_button("Скачать отчёт в PDF", data=buffer_pdf.getvalue(), file_name=f"report_{selected_group['key']}.pdf", width="stretch", mime="application/pdf")
     else:
         st.button("PDF недоступен", disabled=True, width="stretch")
 
@@ -696,38 +674,41 @@ st.subheader("Тренд: отклонение от плана по неделя
 all_weeks_data = []
 seen_weeks = set()
 
-for s in all_snapshots:
-    week_key = s["datetime"].strftime("%Y-W%W")
+for key in group_keys:
+    dt = parse_timestamp(key)
+    if dt == datetime.min:
+        continue
+    week_key = dt.strftime("%Y-W%W")
     if week_key in seen_weeks:
         continue
     seen_weeks.add(week_key)
     
     try:
-        w_data = load_snapshot(s["path"])
+        w_data = load_all_snapshots(tuple(snapshot_groups[key]))
         w_rev_df = w_data["revenue"]
         if selected_by != "Все":
             w_rev_df = w_rev_df[w_rev_df["БЮ"] == selected_by]
-        w_rev_b = w_rev_df["Выручка_бюджет"].sum()
-        w_rev_pr = w_rev_df["Выручка_прогноз"].sum()
+        w_rev_pr = w_rev_df["Выручка_прогноз"].sum() if "Выручка_прогноз" in w_rev_df.columns else 0
+        w_rev_b = w_rev_df["Выручка_бюджет"].sum() if "Выручка_бюджет" in w_rev_df.columns else 0
         
         w_dr_df = w_data["direct"]
         if selected_by != "Все":
             w_dr_df = w_dr_df[w_dr_df["БЮ"] == selected_by]
-        w_staff_b = w_dr_df["StaffCost_бюджет"].sum()
-        w_staff_pr = w_dr_df["StaffCost_прогноз"].sum()
-        w_cogs_b = w_dr_df["COGS_бюджет"].sum()
-        w_cogs_pr = w_dr_df["COGS_прогноз"].sum()
+        w_staff_pr = w_dr_df["StaffCost_прогноз"].sum() if "StaffCost_прогноз" in w_dr_df.columns else 0
+        w_staff_b = w_dr_df["StaffCost_бюджет"].sum() if "StaffCost_бюджет" in w_dr_df.columns else 0
+        w_cogs_pr = w_dr_df["COGS_прогноз"].sum() if "COGS_прогноз" in w_dr_df.columns else 0
+        w_cogs_b = w_dr_df["COGS_бюджет"].sum() if "COGS_бюджет" in w_dr_df.columns else 0
         
         w_sga_df = w_data["sga"]
-        w_sga_b = w_sga_df["SGA_бюджет"].sum()
-        w_sga_pr = w_sga_df["SGA_прогноз"].sum()
+        w_sga_pr = w_sga_df["SGA_прогноз"].sum() if "SGA_прогноз" in w_sga_df.columns else 0
+        w_sga_b = w_sga_df["SGA_бюджет"].sum() if "SGA_бюджет" in w_sga_df.columns else 0
 
-        w_gp3_b = w_rev_b - (w_staff_b + w_cogs_b)
         w_gp3_pr = w_rev_pr - (w_staff_pr + w_cogs_pr)
-        w_ebitda_b = w_gp3_b - w_sga_b
+        w_gp3_b = w_rev_b - (w_staff_b + w_cogs_b)
         w_ebitda_pr = w_gp3_pr - w_sga_pr
+        w_ebitda_b = w_gp3_b - w_sga_b
 
-        monday = s["datetime"] - pd.Timedelta(days=s["datetime"].weekday())
+        monday = dt - pd.Timedelta(days=dt.weekday())
         all_weeks_data.append({
             "Неделя": monday,
             "Revenue": w_rev_pr - w_rev_b,
@@ -776,31 +757,37 @@ dyn_metric = st.radio(
 week_dyn = []
 seen_weeks_dyn = set()
 
-for s in all_snapshots:
-    week_key = s["datetime"].strftime("%Y-W%W")
+for key in group_keys:
+    dt = parse_timestamp(key)
+    if dt == datetime.min:
+        continue
+    week_key = dt.strftime("%Y-W%W")
     if week_key in seen_weeks_dyn:
         continue
     seen_weeks_dyn.add(week_key)
     
     try:
-        w_data = load_snapshot(s["path"])
-        w_rev, w_dr, w_sg = w_data["revenue"], w_data["direct"], w_data["sga"]
+        w_data = load_all_snapshots(tuple(snapshot_groups[key]))
+        w_rev = w_data["revenue"]
+        w_dr = w_data["direct"]
+        w_sg = w_data["sga"]
+        
         if selected_by != "Все":
             w_rev = w_rev[w_rev["БЮ"] == selected_by]
             w_dr = w_dr[w_dr["БЮ"] == selected_by]
 
-        w_rev_total = w_rev["Выручка_факт"].sum()
-        w_rev_backlog = w_rev["Выручка_Backlog"].sum() if "Выручка_Backlog" in w_rev.columns else 0
-        w_rev_pipeline = w_rev["Выручка_Pipeline"].sum() if "Выручка_Pipeline" in w_rev.columns else 0
-        w_rev_gap = w_rev["Выручка_Extra_GAP"].sum() if "Выручка_Extra_GAP" in w_rev.columns else 0
+        w_rev_total = w_rev["Сумма_сделки"].sum() if "Сумма_сделки" in w_rev.columns else 0
+        w_rev_backlog = w_rev[w_rev["Тип_сделки"] == "Backlog"]["Сумма_сделки"].sum() if "Тип_сделки" in w_rev.columns else 0
+        w_rev_pipeline = w_rev[w_rev["Тип_сделки"] == "Pipeline"]["Сумма_сделки"].sum() if "Тип_сделки" in w_rev.columns else 0
+        w_rev_gap = w_rev[w_rev["Тип_сделки"] == "GAP"]["Сумма_сделки"].sum() if "Тип_сделки" in w_rev.columns else 0
 
-        w_staff, w_cogs = w_dr["StaffCost_факт"].sum(), w_dr["COGS_факт"].sum()
-        w_direct = w_staff + w_cogs
-        w_sga = w_sg["SGA_факт"].sum()
+        w_staff = w_dr["Сумма_затрат"].sum() if "Сумма_затрат" in w_dr.columns else 0
+        w_direct = w_staff
+        w_sga = w_sg["SGA"].sum() if "SGA" in w_sg.columns else 0
         w_gp3 = w_rev_total - w_direct
         w_ebitda = w_gp3 - w_sga
 
-        monday = s["datetime"] - pd.Timedelta(days=s["datetime"].weekday())
+        monday = dt - pd.Timedelta(days=dt.weekday())
         week_dyn.append({
             "Неделя": monday, 
             "Revenue": w_rev_total, 
@@ -808,7 +795,7 @@ for s in all_snapshots:
             "Revenue_Pipeline": w_rev_pipeline, 
             "Revenue_Extra_GAP": w_rev_gap,
             "StaffCost": w_staff, 
-            "COGS": w_cogs, 
+            "COGS": 0,
             "Прямые расходы": w_direct,
             "SGA": w_sga, 
             "GP3": w_gp3, 
@@ -827,8 +814,8 @@ if week_dyn:
         y_cols = ["Revenue_Backlog", "Revenue_Pipeline", "Revenue_Extra_GAP"]
         title = "Revenue по типам (Backlog / Pipeline / Extra GAP)"
     elif dyn_metric == "Прямые расходы":
-        y_cols = ["StaffCost", "COGS"]
-        title = "Прямые расходы: StaffCost vs COGS"
+        y_cols = ["StaffCost"]
+        title = "Прямые расходы по неделям"
     elif dyn_metric == "SGA":
         y_cols = ["SGA"]
         title = "SGA по неделям"

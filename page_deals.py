@@ -7,7 +7,6 @@ import pandas as pd
 def style_deals(df):
     css = pd.DataFrame('', index=df.index, columns=df.columns)
     
-    # Зебра
     for i in range(1, len(df), 2):
         css.iloc[i, :] = 'background-color: #f8f9fa;'
 
@@ -43,20 +42,15 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         "Менеджер проекта": "Менеджер",
         "Вероятность сделки": "Вероятность",
         "Тип предложения": "Тип_сделки",
+        "Туалет": "Статус",
+        "Полис хун": "Вероятность"
     }
     deals = deals.rename(columns=rename_map)
 
-    required_cols = ["Менеджер", "Тип_сделки"]
+    required_cols = ["Менеджер", "Тип_сделки", "Статус", "Вероятность"]
     for col in required_cols:
         if col not in deals.columns:
             deals[col] = "—"
-
-    # Если колонки "Статус" нет — создаем её
-    if "Статус" not in deals.columns:
-        deals["Статус"] = "В работе"
-
-    if "Вероятность" not in deals.columns:
-        deals["Вероятность"] = 0
 
     ctx = (selected_by, selected_date)
     if st.session_state.get("_deals_ctx") != ctx:
@@ -132,7 +126,6 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         prob_col = filtered_deals["Вероятность"] * 100 if is_fraction else filtered_deals["Вероятность"]
         filtered_deals = filtered_deals[prob_col.round(0) > 0]
 
-    # Сравнение с предыдущим BR
     if comparison_deals is not None and not comparison_deals.empty:
         comparison_deals = comparison_deals.copy()
         if 'Сумма_сделки' in comparison_deals.columns:
@@ -162,11 +155,11 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         else:
             filtered_deals['Δ Сумма сделки'] = 0
             filtered_deals['Δ Вероятность'] = 0
-            filtered_deals['Статус_prev'] = "—"
+            filtered_deals['Статус_prev'] = None
     else:
         filtered_deals['Δ Сумма сделки'] = 0
         filtered_deals['Δ Вероятность'] = 0
-        filtered_deals['Статус_prev'] = "—"
+        filtered_deals['Статус_prev'] = None
 
     st.markdown("---")
     st.subheader("Реестр сделок")
@@ -213,29 +206,21 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         display["Δ Вероятность"] = display["Δ Вероятность"].fillna(0).round(0).astype(int)
         display["Δ Вероятность"] = display["Δ Вероятность"].apply(lambda x: f"+{x}%" if x > 0 else f"{x}%" if x < 0 else "0%")
 
-        # Формируем список колонок для отображения
         all_concept_cols = [
-            "ID_сделки", "БЮ", "SubBU", "Менеджер", "Заказчик",
-            "Тип_сделки", "Этап", "Сумма_сделки", "Δ Сумма сделки", 
+            "ID_сделки", "БЮ", "Менеджер", "Заказчик",
+            "Тип_сделки", "Сумма_сделки", "Δ Сумма сделки", 
             "Статус", "Статус_prev",
-            "Прогноз_подписания", "Дата_заведения", "План_старт",
             "Вероятность", "Δ Вероятность",
-            "Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4",
         ]
 
         cols_present = [c for c in all_concept_cols if c in display.columns]
 
-        for col in ["Сумма_сделки", "Δ Сумма сделки", "Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4"]:
+        for col in ["Сумма_сделки", "Δ Сумма сделки"]:
             if col in display.columns:
                 display[col] = display[col].apply(lambda v: fmt_num(v, 0))
 
-        # Переименовываем колонку Статус_prev для отображения
-        if "Статус_prev" in display.columns:
-            display["Статус_prev"] = display["Статус_prev"].fillna("—")
-
         df_display = display[cols_present].rename(columns={"Статус_prev": "Статус (Prev. BR)"})
         
-        # Применяем стилизацию (зебра + цветные дельты)
         styler = df_display.style.apply(style_deals, axis=None).hide(axis="index")
         
         st.dataframe(
@@ -252,13 +237,12 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     st.markdown("---")
     st.subheader("Итого по выборке")
 
-    total_weighted = filtered_deals["Взвешенная_выручка"].sum() if "Взвешенная_выручка" in filtered_deals.columns else 0
     total_sum = filtered_deals["Сумма_сделки"].sum() if "Сумма_сделки" in filtered_deals.columns else 0
 
     c1, c2, c3 = st.columns(3)
     c1.metric("Всего сделок", len(filtered_deals))
     c2.metric("Сумма сделок", f"{fmt_num(total_sum, 0)} тыс. руб.")
-    c3.metric("Взвешенная выручка", f"{fmt_num(total_weighted, 0)} тыс. руб.")
+    c3.metric("Средняя вероятность", f"{filtered_deals['Вероятность'].mean():.0f}%")
 
     st.markdown("---")
 
