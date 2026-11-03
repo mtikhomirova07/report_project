@@ -7,6 +7,7 @@ import pandas as pd
 def style_deals(df):
     css = pd.DataFrame('', index=df.index, columns=df.columns)
     
+    # Зебра
     for i in range(1, len(df), 2):
         css.iloc[i, :] = 'background-color: #f8f9fa;'
 
@@ -42,8 +43,6 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         "Менеджер проекта": "Менеджер",
         "Вероятность сделки": "Вероятность",
         "Тип предложения": "Тип_сделки",
-        "Туалет": "Статус",
-        "Полис хун": "Вероятность"
     }
     deals = deals.rename(columns=rename_map)
 
@@ -51,6 +50,17 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     for col in required_cols:
         if col not in deals.columns:
             deals[col] = "—"
+
+    if "Статус" not in deals.columns:
+        deals["Статус"] = "В работе"
+
+    if "Вероятность" not in deals.columns:
+        deals["Вероятность"] = 0
+
+    # [FIX] Считаем сумму сделки как Q1+Q2+Q3+Q4
+    q_cols = [c for c in ["Q1", "Q2", "Q3", "Q4"] if c in deals.columns]
+    if q_cols:
+        deals["Сумма_сделки"] = deals[q_cols].sum(axis=1)
 
     ctx = (selected_by, selected_date)
     if st.session_state.get("_deals_ctx") != ctx:
@@ -101,8 +111,6 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
 
     filtered_deals = deals.copy()
 
-    if 'Сумма_сделки' in filtered_deals.columns:
-        filtered_deals['Сумма_сделки'] = pd.to_numeric(filtered_deals['Сумма_сделки'], errors='coerce').fillna(0)
     if 'Вероятность' in filtered_deals.columns:
         filtered_deals['Вероятность'] = pd.to_numeric(filtered_deals['Вероятность'], errors='coerce').fillna(0)
 
@@ -126,10 +134,13 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         prob_col = filtered_deals["Вероятность"] * 100 if is_fraction else filtered_deals["Вероятность"]
         filtered_deals = filtered_deals[prob_col.round(0) > 0]
 
+    # Сравнение с предыдущим BR
     if comparison_deals is not None and not comparison_deals.empty:
         comparison_deals = comparison_deals.copy()
-        if 'Сумма_сделки' in comparison_deals.columns:
-            comparison_deals['Сумма_сделки'] = pd.to_numeric(comparison_deals['Сумма_сделки'], errors='coerce').fillna(0)
+        comp_q_cols = [c for c in ["Q1", "Q2", "Q3", "Q4"] if c in comparison_deals.columns]
+        if comp_q_cols:
+            comparison_deals["Сумма_сделки"] = comparison_deals[comp_q_cols].sum(axis=1)
+        
         if 'Вероятность' in comparison_deals.columns:
             comparison_deals['Вероятность'] = pd.to_numeric(comparison_deals['Вероятность'], errors='coerce').fillna(0)
 
@@ -155,11 +166,11 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         else:
             filtered_deals['Δ Сумма сделки'] = 0
             filtered_deals['Δ Вероятность'] = 0
-            filtered_deals['Статус_prev'] = None
+            filtered_deals['Статус_prev'] = "—"
     else:
         filtered_deals['Δ Сумма сделки'] = 0
         filtered_deals['Δ Вероятность'] = 0
-        filtered_deals['Статус_prev'] = None
+        filtered_deals['Статус_prev'] = "—"
 
     st.markdown("---")
     st.subheader("Реестр сделок")
