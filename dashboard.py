@@ -83,6 +83,23 @@ def fmt_pct(value, decimals=1):
     return f"−{formatted}%" if value < 0 else f"+{formatted}%" if value > 0 else f"{formatted}%"
 
 # --- КНОПКА ОБНОВЛЕНИЯ ---
+# --- АВТОЗАГРУЗКА ПРИ ПЕРВОМ ВХОДЕ ---
+snapshot_files_check = glob.glob(str(SNAPSHOTS_DIR / "*.xlsx"))
+
+if not snapshot_files_check:
+    # Папка пуста — загружаем данные с Яндекс.Диска автоматически
+    with st.spinner("Первый запуск. Загружаю данные с Яндекс.Диска..."):
+        from loader import update_data
+        success, message = update_data()
+    if success:
+        st.sidebar.success(message)
+        st.cache_data.clear()
+        st.rerun()
+    else:
+        st.sidebar.error(f"Ошибка: {message}")
+        st.stop()
+
+# --- КНОПКА ОБНОВЛЕНИЯ (ручная) ---
 if st.sidebar.button("🔄 Обновить данные", width="stretch"):
     with st.spinner("Загружаю данные с Яндекс.Диска..."):
         from loader import update_data
