@@ -6,6 +6,7 @@ import io
 import subprocess
 import sys
 import glob
+import re
 from datetime import datetime
 from pathlib import Path
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
@@ -56,7 +57,6 @@ FONT_BOLD = FONT_DIR / "DejaVuSans-Bold.ttf"
 def parse_timestamp(ts):
     try:
         # Ищем дату в формате YYYY-MM-DD_HHMM в любом месте строки
-        import re
         match = re.search(r"(\d{4}-\d{2}-\d{2}_\d{4})", ts)
         if match:
             return datetime.strptime(match.group(1), "%Y-%m-%d_%H%M")
@@ -82,12 +82,10 @@ def fmt_pct(value, decimals=1):
     formatted = f"{abs(value):.{decimals}f}"
     return f"−{formatted}%" if value < 0 else f"+{formatted}%" if value > 0 else f"{formatted}%"
 
-# --- КНОПКА ОБНОВЛЕНИЯ ---
 # --- АВТОЗАГРУЗКА ПРИ ПЕРВОМ ВХОДЕ ---
 snapshot_files_check = glob.glob(str(SNAPSHOTS_DIR / "*.xlsx"))
 
 if not snapshot_files_check:
-    # Папка пуста — загружаем данные с Яндекс.Диска автоматически
     with st.spinner("Первый запуск. Загружаю данные с Яндекс.Диска..."):
         from loader import update_data
         success, message = update_data()
@@ -117,17 +115,16 @@ if not snapshot_files:
     st.error("Нет снимков. Нажмите «Обновить данные».")
     st.stop()
 
-# Группируем файлы по времени загрузки
+# Группируем файлы по неделям (папкам)
 snapshot_groups = {}
 for f in snapshot_files:
     stem = Path(f).stem
-    # Ищем ключ группы: дата + название папки недели (если есть)
-    import re
-    date_match = re.search(r"(\d{4}-\d{2}-\d{2}_\d{4})", stem)
+    # Ищем ключ группы: папка недели (2026-W44) или дата
     week_match = re.search(r"(2026-W\d+)", stem)
+    date_match = re.search(r"(\d{4}-\d{2}-\d{2}_\d{4})", stem)
     
-    if date_match and week_match:
-        key = f"{week_match.group(1)}_{date_match.group(1)}"
+    if week_match:
+        key = week_match.group(1)
     elif date_match:
         key = date_match.group(1)
     else:
@@ -169,10 +166,16 @@ def load_all_snapshots(paths):
 def build_group_options(groups):
     options = []
     for key in sorted(groups.keys(), reverse=True):
-        dt = parse_timestamp(key)
-        if dt != datetime.min:
-            label = f"{dt.strftime('%d.%m.%Y %H:%M')}"
-            options.append({"label": label, "key": key, "paths": groups[key]})
+        # Если ключ — это неделя (2026-W44), показываем её. Если дата — тоже показываем.
+        if key.startswith("2026-W"):
+            label = key
+        else:
+            dt = parse_timestamp(key)
+            if dt != datetime.min:
+                label = f"{dt.strftime('%d.%m.%Y %H:%M')}"
+            else:
+                label = key
+        options.append({"label": label, "key": key, "paths": groups[key]})
     return options
 
 st.sidebar.markdown("---")
@@ -242,8 +245,7 @@ if prev_br_date:
 
 st.sidebar.markdown("**Актуальный прогноз**")
 if comparison_data:
-    comp_dt = parse_timestamp(prev_br_date).strftime('%d.%m.%Y')
-    st.sidebar.caption(f"Сравнение с BR от {comp_dt}")
+    st.sidebar.caption(f"Сравнение с BR: {prev_br_date}")
 else:
     st.sidebar.caption("Нет предыдущего BR для сравнения")
 
@@ -374,15 +376,14 @@ def gm_pct(prefix):
     return (gp3(prefix) / rev_val * 100) if rev_val else 0
 
 st.title("Управленческая отчётность")
-dt_str = parse_timestamp(selected_group["key"]).strftime("%d.%m.%Y %H:%M")
+dt_str = selected_group["key"]
 st.caption(f"Отчёт от {dt_str} | БЮ: {selected_by} | Единицы: тыс. руб.")
 st.markdown("---")
 
 st.subheader("P&L по статьям")
 
 if comparison_data:
-    comp_dt = parse_timestamp(prev_br_date).strftime('%d.%m.%Y')
-    st.caption(f"**Режим сравнения:** показатели колонки `Прогноз` сравниваются с отчетом от **{comp_dt}**. Разница отображена в колонке `Δ Prev. BR`.")
+    st.caption(f"**Режим сравнения:** показатели колонки `Прогноз` сравниваются с отчетом **{prev_br_date}**. Разница отображена в колонке `Δ Prev. BR`.")
 else:
     st.caption("Кликните на строку Backlog / Pipeline / Extra GAP, чтобы открыть детализацию по сделкам. Сравнение не выбрано, данные в колонке `Prev. BR` — базовые (из файла).")
 
@@ -660,21 +661,22 @@ all_weeks_data = []
 seen_weeks = set()
 
 for key in group_keys:
-    dt = parse_timestamp(key)
-    if dt == datetime.min:
+    if key in seen_weeks:
         continue
-    week_key = dt.strftime("%Y-W%W")
-    if week_key in seen_weeks:
-        continue
-    seen_weeks.add(week_key)
+    seen_weeks.add(key)
     
     try:
         w_data = load_all_snapshots(tuple(snapshot_groups[key]))
         w_rev_df = w_data["revenue"]
         if selected_by != "Все":
             w_rev_df = w_rev_df[w_rev_df["SBU"] == selected_by]
-        w_rev_pr = w_rev_df["Выручка_прогноз"].sum() if "Выручка_прогноз" in w_rev_df.columns else 0
-        w_rev_b = w_rev_df["Выручка_бюджет"].sum() if "Выручка_бюджет" in w_rev_df.columns else 0
+        w_rev_pr = 0
+        w_rev_b = 0
+        for _, row in w_rev_df.iterrows():
+            qty = row.get("Вероятность", 0) / 100.0
+            total = row.get("Q1", 0) + row.get("Q2", 0) + row.get("Q3", 0) + row.get("Q4", 0)
+            w_rev_pr += total * qty
+            w_rev_b += row.get("Бюджет", 0)
         
         w_stf_df = w_data["staff"]
         if selected_by != "Все":
@@ -682,19 +684,15 @@ for key in group_keys:
         
         w_staff_pr = 0
         w_staff_b = 0
+        w_cogs_pr = 0
+        w_cogs_b = 0
         for _, row in w_stf_df.iterrows():
             total = row.get("Q1", 0) + row.get("Q2", 0) + row.get("Q3", 0) + row.get("Q4", 0)
             article = str(row.get("Статья_затрат", "")).strip()
             if "ФОТ" in article or "Премии" in article:
                 w_staff_pr += total
                 w_staff_b += row.get("Бюджет", 0)
-        
-        w_cogs_pr = 0
-        w_cogs_b = 0
-        for _, row in w_stf_df.iterrows():
-            total = row.get("Q1", 0) + row.get("Q2", 0) + row.get("Q3", 0) + row.get("Q4", 0)
-            article = str(row.get("Статья_затрат", "")).strip()
-            if "ФОТ" not in article and "Премии" not in article:
+            else:
                 w_cogs_pr += total
                 w_cogs_b += row.get("Бюджет", 0)
 
@@ -705,9 +703,8 @@ for key in group_keys:
         w_ebitda_pr = w_gp3_pr - w_sga_pr
         w_ebitda_b = w_gp3_b - w_sga_b
 
-        monday = dt - pd.Timedelta(days=dt.weekday())
         all_weeks_data.append({
-            "Неделя": monday,
+            "Неделя": key,
             "Revenue": w_rev_pr - w_rev_b,
             "StaffCost": w_staff_pr - w_staff_b,
             "COGS": w_cogs_pr - w_cogs_b,
@@ -734,7 +731,7 @@ if all_weeks_data:
             tickformat="%d.%m",
             tickmode="array",
             tickvals=trend_df["Неделя"],
-            ticktext=[d.strftime("%d.%m") for d in trend_df["Неделя"]]
+            ticktext=trend_df["Неделя"]
         ),
         height=400,
     )
@@ -755,13 +752,9 @@ week_dyn = []
 seen_weeks_dyn = set()
 
 for key in group_keys:
-    dt = parse_timestamp(key)
-    if dt == datetime.min:
+    if key in seen_weeks_dyn:
         continue
-    week_key = dt.strftime("%Y-W%W")
-    if week_key in seen_weeks_dyn:
-        continue
-    seen_weeks_dyn.add(week_key)
+    seen_weeks_dyn.add(key)
     
     try:
         w_data = load_all_snapshots(tuple(snapshot_groups[key]))
@@ -804,9 +797,8 @@ for key in group_keys:
         w_gp3 = w_rev_total - w_direct
         w_ebitda = w_gp3 - w_sga
 
-        monday = dt - pd.Timedelta(days=dt.weekday())
         week_dyn.append({
-            "Неделя": monday, 
+            "Неделя": key, 
             "Revenue": w_rev_total, 
             "Revenue_Backlog": w_rev_backlog,
             "Revenue_Pipeline": w_rev_pipeline, 
@@ -853,13 +845,12 @@ if week_dyn:
             tickformat="%d.%m", 
             tickmode="array", 
             tickvals=dyn_df["Неделя"], 
-            ticktext=[d.strftime("%d.%m") for d in dyn_df["Неделя"]]
+            ticktext=dyn_df["Неделя"]
         )
     )
     st.plotly_chart(fig_dyn, width="stretch")
 
     with st.expander("Показать данные по неделям"):
         display_df = dyn_df.copy()
-        display_df["Неделя"] = display_df["Неделя"].dt.strftime("%d.%m.%Y")
         styler = display_df.style.apply(zebra_style, axis=None).hide(axis="index")
         st.dataframe(styler, width="stretch", height=350)
