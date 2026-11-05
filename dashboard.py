@@ -89,12 +89,7 @@ for f in snapshot_files:
     snapshot_groups.setdefault(key, []).append(f)
 group_keys = sorted(snapshot_groups.keys(), reverse=True)
 
-# --- НОРМАЛИЗАЦИЯ ШАПКИ ---
-def _norm(s: str) -> str:
-    s = str(s).replace("\n", " ").replace("\t", " ")
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
+# --- ЧТЕНИЕ EXCEL С ЖЕСТКИМИ КОЛОНКАМИ ---
 def read_excel_with_header(path, sheet_name):
     try:
         df = pd.read_excel(path, sheet_name=sheet_name, header=None, engine="calamine")
@@ -103,49 +98,63 @@ def read_excel_with_header(path, sheet_name):
     if df.empty:
         return pd.DataFrame()
 
+    # Ищем строку с SBU (начало данных)
     header_row = None
     for i in range(min(15, len(df))):
-        row = [_norm(x).upper() for x in df.iloc[i].tolist()]
+        row = [str(x).strip().upper() for x in df.iloc[i].tolist()]
         if "SBU" in row:
             header_row = i
             break
     if header_row is None:
         return pd.DataFrame()
 
-    h1 = df.iloc[header_row].tolist()
-    h2 = df.iloc[header_row + 1].tolist() if header_row + 1 < len(df) else [""] * len(h1)
-
-    cols, last_block, seen = [], "", {}
-    for a, b in zip(h1, h2):
-        a_n, b_n = _norm(a), _norm(b)
-        if a_n and not a_n.lower().startswith("unnamed"):
-            last_block = a_n
-        if b_n.upper() in ("Q1", "Q2", "Q3", "Q4"):
-            name = f"{last_block}_{b_n.upper()}"
-        elif b_n and not b_n.lower().startswith("unnamed"):
-            name = b_n
-        elif a_n and not a_n.lower().startswith("unnamed"):
-            name = a_n
-        else:
-            name = "col"
-        
-        if name in seen:
-            seen[name] += 1
-            name = f"{name}__{seen[name]}"
-        else:
-            seen[name] = 0
-        cols.append(name)
-
-    data = df.iloc[header_row + 2:].copy()
-    data.columns = cols
+    # Данные начинаются с найденной строки
+    data = df.iloc[header_row:].copy()
     data = data.dropna(how="all").reset_index(drop=True)
-    
-    data.columns = [str(c).strip() for c in data.columns]
 
+    # ПРИНУДИТЕЛЬНО задаем имена колонкам по их физическому порядку
+    if "Revenue" in sheet_name or "Rev_" in sheet_name:
+        expected_cols = [
+            "SBU", "Заказчик", "Название", "Ссылка", "Признак_XT", 
+            "Вероятность", "Backlog_Pipeline", 
+            "Невзвешенная_Q1", "Невзвешенная_Q2", "Невзвешенная_Q3", "Невзвешенная_Q4",
+            "COGS_Q1", "COGS_Q2", "COGS_Q3", "COGS_Q4",
+            "Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4",
+            "Взвешенные_COGS_Q1", "Взвешенные_COGS_Q2", "Взвешенные_COGS_Q3", "Взвешенные_COGS_Q4",
+            "Rev2027", "Cogs2027", "H2_GM1", "Проект", "ОПП", "GM3"
+        ]
+    else:
+        expected_cols = [
+            "SBU", "ФИО", "Admin_Проект", "Признак_XT",
+            "ФОТ_Q1", "ФОТ_Q2", "ФОТ_Q3", "ФОТ_Q4",
+            "Премии_Q1", "Премии_Q2", "Премии_Q3", "Премии_Q4",
+            "Доп_Q1", "Доп_Q2", "Доп_Q3", "Доп_Q4",
+            "ИТОГО_Q1", "ИТОГО_Q2", "ИТОГО_Q3", "ИТОГО_Q4",
+            "Год2027"
+        ]
+
+    # Подгоняем количество колонок под реальные данные
+    actual_cols = list(data.columns)
+    if len(actual_cols) > len(expected_cols):
+        expected_cols += [f"extra_{i}" for i in range(len(actual_cols) - len(expected_cols))]
+    elif len(actual_cols) < len(expected_cols):
+        expected_cols = expected_cols[:len(actual_cols)]
+
+    data.columns = expected_cols
+
+    # Чистим колонку "Вероятность" от %
     if "Вероятность" in data.columns:
         data["Вероятность"] = data["Вероятность"].astype(str).str.replace("%", "").str.replace(",", ".")
         data["Вероятность"] = pd.to_numeric(data["Вероятность"], errors="coerce").fillna(0)
-        
+
+    # Принудительно конвертируем все числовые колонки Q в числа
+    for col in data.columns:
+        if "_Q" in col:
+            data[col] = pd.to_numeric(
+                data[col].astype(str).str.replace("₽", "").str.replace(" ", "").str.replace(",", "."),
+                errors="coerce"
+            ).fillna(0)
+
     return data
 
 @st.cache_data(show_spinner=False)
@@ -167,10 +176,6 @@ def load_all_snapshots(paths):
                 if d.empty:
                     continue
                 
-                if "SBU" not in d.columns:
-                    first_col = d.columns[0]
-                    d = d.rename(columns={first_col: "SBU"})
-                
                 if is_rev:
                     rev_parts.append(d)
                 else:
@@ -180,63 +185,43 @@ def load_all_snapshots(paths):
     stf = pd.concat(staff_parts, ignore_index=True) if staff_parts else pd.DataFrame()
     return rev, stf, errors
 
-# --- ДИНАМИЧЕСКИЙ ПОИСК КОЛОНОК ---
-def find_col(df, keyword):
-    if df is None or df.empty:
-        return None
-    for col in df.columns:
-        if keyword.lower() in str(col).lower():
-            return col
-    return None
-
-def qsum(df, keyword, quarters=("Q1", "Q2", "Q3", "Q4")):
-    if df is None or df.empty:
-        return 0.0
-    col_base = find_col(df, keyword)
-    if not col_base:
-        return 0.0
-    
+# --- ФУНКЦИИ РАСЧЕТА ---
+def get_rev(df, quarters=("Q1","Q2","Q3","Q4")):
     total = 0.0
     for q in quarters:
-        col = f"{col_base}_{q}"
+        col = f"Взвешенная_{q}"
         if col in df.columns:
-            total += pd.to_numeric(df[col], errors="coerce").fillna(0).sum()
+            total += df[col].sum()
     return float(total)
 
-def get_rev(df, quarters=("Q1","Q2","Q3","Q4")):
-    return qsum(df, "Взвешенная выручка", quarters)
-
 def get_cogs(df, quarters=("Q1","Q2","Q3","Q4")):
-    return qsum(df, "Взвешенные COGS", quarters)
+    total = 0.0
+    for q in quarters:
+        col = f"Взвешенные_COGS_{q}"
+        if col in df.columns:
+            total += df[col].sum()
+    return float(total)
 
 def get_staff(df, quarters=("Q1","Q2","Q3","Q4")):
     if df is None or df.empty:
         return 0.0
-    total = qsum(df, "ИТОГО StaffCost", quarters)
-    if total > 0:
-        return total
-    return (qsum(df, "Прогноз ФОТ", quarters)
-            + qsum(df, "Резерв на премии", quarters)
-            + qsum(df, "Доп расходы", quarters))
+    total = 0.0
+    for q in quarters:
+        col = f"ИТОГО_{q}"
+        if col in df.columns:
+            total += df[col].sum()
+    return float(total)
 
 def filter_by_sbu(df, sbu):
     if df is None or df.empty or sbu == "Все" or "SBU" not in df.columns:
         return df
     return df[df["SBU"] == sbu]
 
-DEAL_TYPE = "Backlog / Pipeline"
-
 def split_by_type(df):
     out = {"Backlog": pd.DataFrame(), "Pipeline": pd.DataFrame(), "GAP": pd.DataFrame()}
-    if df is None or df.empty:
+    if df is None or df.empty or "Backlog_Pipeline" not in df.columns:
         return out
-    col_type = find_col(df, "Backlog")
-    if not col_type:
-        col_type = "Тип_сделки" if "Тип_сделки" in df.columns else None
-    if not col_type or col_type not in df.columns:
-        return out
-    
-    t = df[col_type].astype(str).str.strip().str.title()
+    t = df["Backlog_Pipeline"].astype(str).str.strip().str.title()
     for k in out:
         out[k] = df[t == k.title()]
     return out
@@ -290,8 +275,6 @@ st.sidebar.caption(f"Сравнение с BR: {prev_br_key}" if comparison else
 st.sidebar.markdown("---")
 st.sidebar.header("Фильтры")
 rev_all, stf_all, errs = load_all_snapshots(tuple(selected_paths))
-st.write("--- ОТЛАДКА: Список всех колонок ---")
-st.write(rev_all.columns.tolist())
 for e in errs:
     st.sidebar.warning(e)
 if rev_all.empty:

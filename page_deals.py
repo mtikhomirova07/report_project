@@ -39,13 +39,23 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     st.title("Сделки")
     st.caption("Фильтр по статусу — выберите нужный в фильтрах ниже.")
 
+    if deals is None:
+        st.error("Нет данных по сделкам.")
+        return
+
+    deals = deals.copy()
+
+    # Переименовываем колонки, если они называются иначе (из-за вырезанных стилей)
     rename_map = {
         "Менеджер проекта": "Менеджер",
         "Вероятность сделки": "Вероятность",
         "Тип предложения": "Тип_сделки",
+        "Backlog_Pipeline": "Тип_сделки",
+        "Заказчик": "Клиент",
     }
     deals = deals.rename(columns=rename_map)
 
+    # Безопасное создание обязательных колонок
     required_cols = ["Менеджер", "Тип_сделки", "Статус", "Вероятность"]
     for col in required_cols:
         if col not in deals.columns:
@@ -55,15 +65,16 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         deals["Статус"] = "В работе"
 
     if "Вероятность" not in deals.columns:
-        deals["Вероятность"] = 0
+        deals["Вероятность"] = 0.0
 
-        # [FIX] Считаем сумму сделки как Q1+Q2+Q3+Q4
+    # --- FIX: Безопасный подсчет суммы сделки ---
     q_cols = [c for c in ["Q1", "Q2", "Q3", "Q4"] if c in deals.columns]
     if q_cols:
-        # Превращаем все текстовые значения (включая "#######") в числа или 0
         for c in q_cols:
             deals[c] = pd.to_numeric(deals[c].astype(str).str.replace(" ", "").str.replace(",", "."), errors="coerce").fillna(0)
         deals["Сумма_сделки"] = deals[q_cols].sum(axis=1)
+    else:
+        deals["Сумма_сделки"] = 0
 
     ctx = (selected_by, selected_date)
     if st.session_state.get("_deals_ctx") != ctx:
@@ -102,7 +113,6 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
             options=prob_options, 
             key="deals_probs", 
             placeholder="Все вероятности",
-            select_all=False
         )
 
     st.button("Сбросить фильтры", on_click=reset_filters)
@@ -114,8 +124,12 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
 
     filtered_deals = deals.copy()
 
-    if 'Вероятность' in filtered_deals.columns:
-        filtered_deals['Вероятность'] = pd.to_numeric(filtered_deals['Вероятность'], errors='coerce').fillna(0)
+    # Приводим вероятность к числам
+    filtered_deals['Вероятность'] = pd.to_numeric(filtered_deals['Вероятность'], errors='coerce').fillna(0)
+    
+    # Если вероятности пришли как 0.3, 0.5 — переводим в 30, 50
+    max_prob = filtered_deals["Вероятность"].max()
+    is_fraction = max_prob <= 1.0 if pd.notna(max_prob) else True
 
     if sel_manager != "Все":
         filtered_deals = filtered_deals[filtered_deals["Менеджер"] == sel_manager]
@@ -127,35 +141,34 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         filtered_deals = filtered_deals[filtered_deals["Статус"] == sel_status]
 
     if sel_probs:
-        max_prob = filtered_deals["Вероятность"].max()
-        is_fraction = max_prob <= 1.0 if pd.notna(max_prob) else True
         prob_col = filtered_deals["Вероятность"] * 100 if is_fraction else filtered_deals["Вероятность"]
         filtered_deals = filtered_deals[prob_col.round(0).isin(sel_probs)]
     else:
-        max_prob = filtered_deals["Вероятность"].max()
-        is_fraction = max_prob <= 1.0 if pd.notna(max_prob) else True
         prob_col = filtered_deals["Вероятность"] * 100 if is_fraction else filtered_deals["Вероятность"]
         filtered_deals = filtered_deals[prob_col.round(0) > 0]
 
-    # Сравнение с предыдущим BR
+    # Сравнение с предыдущим BR (если передано)
     if comparison_deals is not None and not comparison_deals.empty:
         comparison_deals = comparison_deals.copy()
         comp_q_cols = [c for c in ["Q1", "Q2", "Q3", "Q4"] if c in comparison_deals.columns]
         if comp_q_cols:
+            for c in comp_q_cols:
+                comparison_deals[c] = pd.to_numeric(comparison_deals[c].astype(str).str.replace(" ", "").str.replace(",", "."), errors="coerce").fillna(0)
             comparison_deals["Сумма_сделки"] = comparison_deals[comp_q_cols].sum(axis=1)
         
         if 'Вероятность' in comparison_deals.columns:
             comparison_deals['Вероятность'] = pd.to_numeric(comparison_deals['Вероятность'], errors='coerce').fillna(0)
 
-        if 'ID_сделки' in comparison_deals.columns and 'ID_сделки' in filtered_deals.columns:
-            comp_df = comparison_deals[['ID_сделки', 'Сумма_сделки', 'Вероятность', 'Статус']].copy()
+        if 'Название' in comparison_deals.columns and 'Название' in filtered_deals.columns:
+            # Вместо ID используем Название проекта как ключ
+            comp_df = comparison_deals[['Название', 'Сумма_сделки', 'Вероятность', 'Статус']].copy()
             comp_df = comp_df.rename(columns={
                 'Сумма_сделки': 'Сумма_сделки_prev',
                 'Вероятность': 'Вероятность_prev',
                 'Статус': 'Статус_prev'
             })
             
-            filtered_deals = filtered_deals.merge(comp_df, on='ID_сделки', how='left')
+            filtered_deals = filtered_deals.merge(comp_df, on='Название', how='left')
             
             filtered_deals['Δ Сумма сделки'] = filtered_deals['Сумма_сделки'] - filtered_deals['Сумма_сделки_prev'].fillna(0)
             
@@ -193,7 +206,10 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
 
     col_pag1, col_pag2, col_pag3 = st.columns([3, 1, 1])
     with col_pag1:
-        st.caption(f"Показано {start_idx + 1}–{end_idx} из {total_rows} · итого по всей выборке")
+        if total_rows > 0:
+            st.caption(f"Показано {start_idx + 1}–{end_idx} из {total_rows} · итого по всей выборке")
+        else:
+            st.caption("Показано 0 из 0")
     with col_pag2:
         if st.button("← Назад", disabled=(page == 1), width="stretch"):
             st.session_state["deals_page"] = page - 1
@@ -208,8 +224,6 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     if len(page_deals) > 0:
         display = page_deals.copy()
         
-        max_prob = display["Вероятность"].max()
-        is_fraction = max_prob <= 1.0 if pd.notna(max_prob) else True
         if is_fraction:
             display["Вероятность"] = (display["Вероятность"] * 100).round(0)
         else:
@@ -221,7 +235,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         display["Δ Вероятность"] = display["Δ Вероятность"].apply(lambda x: f"+{x}%" if x > 0 else f"{x}%" if x < 0 else "0%")
 
         all_concept_cols = [
-            "ID_сделки", "БЮ", "Менеджер", "Заказчик",
+            "Название", "SBU", "Менеджер", "Клиент", 
             "Тип_сделки", "Сумма_сделки", "Δ Сумма сделки", 
             "Статус", "Статус_prev",
             "Вероятность", "Δ Вероятность",
@@ -256,7 +270,14 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     c1, c2, c3 = st.columns(3)
     c1.metric("Всего сделок", len(filtered_deals))
     c2.metric("Сумма сделок", f"{fmt_num(total_sum, 0)} тыс. руб.")
-    c3.metric("Средняя вероятность", f"{filtered_deals['Вероятность'].mean():.0f}%")
+    
+    if len(filtered_deals) > 0 and "Вероятность" in filtered_deals.columns:
+        avg_prob = filtered_deals['Вероятность'].mean()
+        if is_fraction:
+            avg_prob *= 100
+        c3.metric("Средняя вероятность", f"{avg_prob:.0f}%")
+    else:
+        c3.metric("Средняя вероятность", "—")
 
     st.markdown("---")
 
