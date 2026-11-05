@@ -35,13 +35,17 @@ def style_deals(df):
     return css
 
 def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_num, fmt_pct):
-    # CSS-хак, чтобы убрать кнопку "Select all" в выпадающих списках
+    # CSS: скрываем кнопку "Select all" в multiselect
     st.markdown("""
         <style>
-            [data-testid="stMultiSelect"] span[data-baseweb="tag"] + div + div button {
+            /* Скрываем кнопку "Select all" в выпадающем списке multiselect */
+            div[data-baseweb="popover"] div[role="listbox"] > div:first-child:has(button) {
                 display: none !important;
             }
-            /* Более надежный вариант: скрываем кнопку по aria-label */
+            /* Альтернативный селектор на случай, если первый не сработает */
+            div[data-baseweb="popover"] button[kind="secondary"] {
+                display: none !important;
+            }
             button[aria-label="Select all"] {
                 display: none !important;
             }
