@@ -98,7 +98,6 @@ def read_excel_with_header(path, sheet_name):
     if df.empty:
         return pd.DataFrame()
 
-    # Ищем строку с SBU (начало данных)
     header_row = None
     for i in range(min(15, len(df))):
         row = [str(x).strip().upper() for x in df.iloc[i].tolist()]
@@ -108,11 +107,9 @@ def read_excel_with_header(path, sheet_name):
     if header_row is None:
         return pd.DataFrame()
 
-    # Данные начинаются с найденной строки
     data = df.iloc[header_row:].copy()
     data = data.dropna(how="all").reset_index(drop=True)
 
-    # ПРИНУДИТЕЛЬНО задаем имена колонкам по их физическому порядку
     if "Revenue" in sheet_name or "Rev_" in sheet_name:
         expected_cols = [
             "SBU", "Заказчик", "Название", "Ссылка", "Признак_XT", 
@@ -133,7 +130,6 @@ def read_excel_with_header(path, sheet_name):
             "Год2027"
         ]
 
-    # Подгоняем количество колонок под реальные данные
     actual_cols = list(data.columns)
     if len(actual_cols) > len(expected_cols):
         expected_cols += [f"extra_{i}" for i in range(len(actual_cols) - len(expected_cols))]
@@ -142,12 +138,10 @@ def read_excel_with_header(path, sheet_name):
 
     data.columns = expected_cols
 
-    # Чистим колонку "Вероятность" от %
     if "Вероятность" in data.columns:
         data["Вероятность"] = data["Вероятность"].astype(str).str.replace("%", "").str.replace(",", ".")
         data["Вероятность"] = pd.to_numeric(data["Вероятность"], errors="coerce").fillna(0)
 
-    # Принудительно конвертируем все числовые колонки Q в числа
     for col in data.columns:
         if "_Q" in col:
             data[col] = pd.to_numeric(

@@ -7,7 +7,6 @@ import pandas as pd
 def style_deals(df):
     css = pd.DataFrame('', index=df.index, columns=df.columns)
     
-    # Зебра
     for i in range(1, len(df), 2):
         css.iloc[i, :] = 'background-color: #f8f9fa;'
 
@@ -45,17 +44,13 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
 
     deals = deals.copy()
 
-    # Переименовываем колонки, если они называются иначе (из-за вырезанных стилей)
+    # Подменяем имена колонок, если они отличаются
     rename_map = {
-        "Менеджер проекта": "Менеджер",
-        "Вероятность сделки": "Вероятность",
-        "Тип предложения": "Тип_сделки",
         "Backlog_Pipeline": "Тип_сделки",
         "Заказчик": "Клиент",
     }
     deals = deals.rename(columns=rename_map)
 
-    # Безопасное создание обязательных колонок
     required_cols = ["Менеджер", "Тип_сделки", "Статус", "Вероятность"]
     for col in required_cols:
         if col not in deals.columns:
@@ -67,12 +62,13 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     if "Вероятность" not in deals.columns:
         deals["Вероятность"] = 0.0
 
-    # --- FIX: Безопасный подсчет суммы сделки ---
-    q_cols = [c for c in ["Q1", "Q2", "Q3", "Q4"] if c in deals.columns]
-    if q_cols:
+    # Безопасный подсчет суммы сделки (берем из взвешенных колонок)
+    if "Взвешенная_Q1" in deals.columns:
+        q_cols = ["Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4"]
         for c in q_cols:
-            deals[c] = pd.to_numeric(deals[c].astype(str).str.replace(" ", "").str.replace(",", "."), errors="coerce").fillna(0)
-        deals["Сумма_сделки"] = deals[q_cols].sum(axis=1)
+            if c in deals.columns:
+                deals[c] = pd.to_numeric(deals[c], errors="coerce").fillna(0)
+        deals["Сумма_сделки"] = deals[[c for c in q_cols if c in deals.columns]].sum(axis=1)
     else:
         deals["Сумма_сделки"] = 0
 
@@ -123,11 +119,8 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     sel_probs = st.session_state.get("deals_probs", [])
 
     filtered_deals = deals.copy()
-
-    # Приводим вероятность к числам
     filtered_deals['Вероятность'] = pd.to_numeric(filtered_deals['Вероятность'], errors='coerce').fillna(0)
     
-    # Если вероятности пришли как 0.3, 0.5 — переводим в 30, 50
     max_prob = filtered_deals["Вероятность"].max()
     is_fraction = max_prob <= 1.0 if pd.notna(max_prob) else True
 
@@ -147,46 +140,43 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         prob_col = filtered_deals["Вероятность"] * 100 if is_fraction else filtered_deals["Вероятность"]
         filtered_deals = filtered_deals[prob_col.round(0) > 0]
 
-    # Сравнение с предыдущим BR (если передано)
+    # Сравнение с предыдущим BR
     if comparison_deals is not None and not comparison_deals.empty:
         comparison_deals = comparison_deals.copy()
-        comp_q_cols = [c for c in ["Q1", "Q2", "Q3", "Q4"] if c in comparison_deals.columns]
-        if comp_q_cols:
-            for c in comp_q_cols:
-                comparison_deals[c] = pd.to_numeric(comparison_deals[c].astype(str).str.replace(" ", "").str.replace(",", "."), errors="coerce").fillna(0)
-            comparison_deals["Сумма_сделки"] = comparison_deals[comp_q_cols].sum(axis=1)
         
+        if "Взвешенная_Q1" in comparison_deals.columns:
+            comp_q_cols = ["Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4"]
+            for c in comp_q_cols:
+                if c in comparison_deals.columns:
+                    comparison_deals[c] = pd.to_numeric(comparison_deals[c], errors="coerce").fillna(0)
+            comparison_deals["Сумма_сделки"] = comparison_deals[[c for c in comp_q_cols if c in comparison_deals.columns]].sum(axis=1)
+        else:
+            comparison_deals["Сумма_сделки"] = 0
+            
         if 'Вероятность' in comparison_deals.columns:
             comparison_deals['Вероятность'] = pd.to_numeric(comparison_deals['Вероятность'], errors='coerce').fillna(0)
 
         if 'Название' in comparison_deals.columns and 'Название' in filtered_deals.columns:
-            # Вместо ID используем Название проекта как ключ
-            comp_df = comparison_deals[['Название', 'Сумма_сделки', 'Вероятность', 'Статус']].copy()
+            comp_df = comparison_deals[['Название', 'Сумма_сделки', 'Вероятность']].copy()
             comp_df = comp_df.rename(columns={
                 'Сумма_сделки': 'Сумма_сделки_prev',
                 'Вероятность': 'Вероятность_prev',
-                'Статус': 'Статус_prev'
             })
             
             filtered_deals = filtered_deals.merge(comp_df, on='Название', how='left')
             
             filtered_deals['Δ Сумма сделки'] = filtered_deals['Сумма_сделки'] - filtered_deals['Сумма_сделки_prev'].fillna(0)
             
-            max_prob_cur = filtered_deals["Вероятность"].max()
-            is_frac_cur = max_prob_cur <= 1.0 if pd.notna(max_prob_cur) else True
-            
-            if is_frac_cur:
+            if is_fraction:
                 filtered_deals['Δ Вероятность'] = (filtered_deals['Вероятность'] - filtered_deals['Вероятность_prev'].fillna(0)) * 100
             else:
                 filtered_deals['Δ Вероятность'] = filtered_deals['Вероятность'] - filtered_deals['Вероятность_prev'].fillna(0)
         else:
             filtered_deals['Δ Сумма сделки'] = 0
             filtered_deals['Δ Вероятность'] = 0
-            filtered_deals['Статус_prev'] = "—"
     else:
         filtered_deals['Δ Сумма сделки'] = 0
         filtered_deals['Δ Вероятность'] = 0
-        filtered_deals['Статус_prev'] = "—"
 
     st.markdown("---")
     st.subheader("Реестр сделок")
@@ -237,8 +227,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         all_concept_cols = [
             "Название", "SBU", "Менеджер", "Клиент", 
             "Тип_сделки", "Сумма_сделки", "Δ Сумма сделки", 
-            "Статус", "Статус_prev",
-            "Вероятность", "Δ Вероятность",
+            "Статус", "Вероятность", "Δ Вероятность",
         ]
 
         cols_present = [c for c in all_concept_cols if c in display.columns]
@@ -247,7 +236,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
             if col in display.columns:
                 display[col] = display[col].apply(lambda v: fmt_num(v, 0))
 
-        df_display = display[cols_present].rename(columns={"Статус_prev": "Статус (Prev. BR)"})
+        df_display = display[cols_present]
         
         styler = df_display.style.apply(style_deals, axis=None).hide(axis="index")
         
