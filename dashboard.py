@@ -140,17 +140,16 @@ def read_excel_with_header(path, sheet_name):
     data.columns = cols
     data = data.dropna(how="all").reset_index(drop=True)
     
-    # ФИКС: Принудительно убираем пробелы из названий колонок
+    # Принудительно убираем пробелы из названий колонок
     data.columns = [str(c).strip() for c in data.columns]
 
-    # ФИКС: Чистим проценты в колонке "Вероятность"
+    # Чистим проценты в колонке "Вероятность"
     if "Вероятность" in data.columns:
         data["Вероятность"] = data["Вероятность"].astype(str).str.replace("%", "").str.replace(",", ".")
         data["Вероятность"] = pd.to_numeric(data["Вероятность"], errors="coerce").fillna(0)
         
     return data
 
-@st.cache_data(show_spinner=False)
 @st.cache_data(show_spinner=False)
 def load_all_snapshots(paths):
     rev_parts, staff_parts, errors = [], [], []
@@ -170,7 +169,7 @@ def load_all_snapshots(paths):
                 if d.empty:
                     continue
                 
-                # ФИКС: Если колонки SBU нет, берем первую колонку и называем её SBU
+                # Если колонки SBU нет, берем первую колонку и называем её SBU
                 if "SBU" not in d.columns:
                     first_col = d.columns[0]
                     d = d.rename(columns={first_col: "SBU"})
@@ -292,6 +291,23 @@ selected_by = st.sidebar.selectbox("Бизнес-юнит (БЮ)", by_list)
 
 rev = filter_by_sbu(rev_all, selected_by)
 stf = filter_by_sbu(stf_all, selected_by)
+
+# --- НАВИГАЦИЯ ---
+st.sidebar.markdown("---")
+st.sidebar.header("Навигация")
+page = st.sidebar.radio("Страница", ["P&L", "Сделки"], key="page_nav", label_visibility="collapsed")
+
+if page == "Сделки":
+    from page_deals import render_deals_page
+    render_deals_page(
+        deals=rev,
+        comparison_deals=comparison[0] if comparison else None,
+        selected_by=selected_by,
+        selected_date=selected_key,
+        fmt_num=fmt_num,
+        fmt_pct=fmt_pct,
+    )
+    st.stop()
 
 # --- ТЕКУЩИЕ ИТОГИ ---
 rev_total = get_rev(rev)
