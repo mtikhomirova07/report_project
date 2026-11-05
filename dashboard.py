@@ -151,6 +151,7 @@ def read_excel_with_header(path, sheet_name):
     return data
 
 @st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False)
 def load_all_snapshots(paths):
     rev_parts, staff_parts, errors = [], [], []
     for path in paths:
@@ -159,23 +160,24 @@ def load_all_snapshots(paths):
         except Exception as e:
             errors.append(f"{path}: {e}")
             continue
+            
         for sh in xls.sheet_names:
-            if sh.startswith("Rev_") or sh == "Revenue":
+            is_rev = sh.startswith("Rev_") or sh == "Revenue"
+            is_staff = sh.startswith("Staff_") or sh == "StaffCost"
+            
+            if is_rev or is_staff:
                 d = read_excel_with_header(path, sh)
-                if not d.empty:
-                    # ФИКС: Гарантируем, что колонка называется ровно "SBU"
-                    for col in d.columns:
-                        if str(col).strip().upper() == "SBU":
-                            d = d.rename(columns={col: "SBU"})
-                            break
+                if d.empty:
+                    continue
+                
+                # ФИКС: Если колонки SBU нет, берем первую колонку и называем её SBU
+                if "SBU" not in d.columns:
+                    first_col = d.columns[0]
+                    d = d.rename(columns={first_col: "SBU"})
+                
+                if is_rev:
                     rev_parts.append(d)
-            elif sh.startswith("Staff_") or sh == "StaffCost":
-                d = read_excel_with_header(path, sh)
-                if not d.empty:
-                    for col in d.columns:
-                        if str(col).strip().upper() == "SBU":
-                            d = d.rename(columns={col: "SBU"})
-                            break
+                else:
                     staff_parts.append(d)
                     
     rev = pd.concat(rev_parts, ignore_index=True) if rev_parts else pd.DataFrame()
