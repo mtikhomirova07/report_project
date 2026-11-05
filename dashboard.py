@@ -57,7 +57,6 @@ def fmt_pct(value, decimals=1):
     return f"−{formatted}%" if value < 0 else f"+{formatted}%" if value > 0 else f"{formatted}%"
 
 # --- АВТОЗАГРУЗКА / ОБНОВЛЕНИЕ ---
-# ИЗМЕНЕНО: добавлен ** и recursive=True для поиска файлов в подпапках
 if not glob.glob(str(SNAPSHOTS_DIR / "**" / "*.xlsx"), recursive=True):
     with st.spinner("Первый запуск. Загружаю данные..."):
         from loader import update_data
@@ -77,14 +76,12 @@ if st.sidebar.button("🔄 Обновить данные", width="stretch"):
         st.sidebar.error(f"Ошибка: {msg}")
 
 # --- ГРУППИРОВКА СНИМКОВ ---
-# ИЗМЕНЕНО: добавлен ** и recursive=True для поиска файлов в подпапках
 snapshot_files = sorted(glob.glob(str(SNAPSHOTS_DIR / "**" / "*.xlsx"), recursive=True), reverse=True)
 if not snapshot_files:
     st.error("Нет снимков."); st.stop()
 
 snapshot_groups = {}
 for f in snapshot_files:
-    # ИЗМЕНЕНО: используем родительскую папку как ключ, если в имени файла нет ключа недели
     stem = Path(f).stem
     parent_dir = Path(f).parent.name
     m = re.search(r"(2026-W\d+)", stem) or re.search(r"(2026-W\d+)", parent_dir)
@@ -99,12 +96,8 @@ def _norm(s: str) -> str:
     return s
 
 def read_excel_with_header(path, sheet_name):
-    """
-    Читает лист с двухуровневой шапкой (блок + Q1..Q4).
-    Возвращает DataFrame с нормализованными именами колонок вида
-    'Взвешенная выручка, без НДС, руб._Q1'.
-    """
     try:
+        # Используем calamine, чтобы обойти ошибки XML на Linux
         df = pd.read_excel(path, sheet_name=sheet_name, header=None, engine="calamine")
     except Exception:
         return pd.DataFrame()
@@ -136,7 +129,7 @@ def read_excel_with_header(path, sheet_name):
             name = a_n
         else:
             name = "col"
-        # гарантируем уникальность
+        
         if name in seen:
             seen[name] += 1
             name = f"{name}__{seen[name]}"
@@ -147,11 +140,16 @@ def read_excel_with_header(path, sheet_name):
     data = df.iloc[header_row + 2:].copy()
     data.columns = cols
     data = data.dropna(how="all").reset_index(drop=True)
+    
+    # Чистим проценты в колонке "Вероятность"
+    if "Вероятность" in data.columns:
+        data["Вероятность"] = data["Вероятность"].astype(str).str.replace("%", "").str.replace(",", ".")
+        data["Вероятность"] = pd.to_numeric(data["Вероятность"], errors="coerce").fillna(0)
+        
     return data
 
 @st.cache_data(show_spinner=False)
 def load_all_snapshots(paths):
-    """Возвращает (revenue_df, staff_df, errors:list[str])."""
     rev_parts, staff_parts, errors = [], [], []
     for path in paths:
         try:
@@ -160,14 +158,16 @@ def load_all_snapshots(paths):
             errors.append(f"{path}: {e}")
             continue
         for sh in xls.sheet_names:
-            if sh.startswith("Rev_"):
+            # Проверяем и старое (Rev_), и новое (Revenue) название листа
+            if sh.startswith("Rev_") or sh == "Revenue":
                 d = read_excel_with_header(path, sh)
                 if not d.empty:
                     rev_parts.append(d)
-            elif sh.startswith("Staff_"):
+            elif sh.startswith("Staff_") or sh == "StaffCost":
                 d = read_excel_with_header(path, sh)
                 if not d.empty:
                     staff_parts.append(d)
+                    
     rev = pd.concat(rev_parts, ignore_index=True) if rev_parts else pd.DataFrame()
     stf = pd.concat(staff_parts, ignore_index=True) if staff_parts else pd.DataFrame()
     return rev, stf, errors
@@ -198,7 +198,6 @@ def get_cogs(df, quarters=("Q1","Q2","Q3","Q4")):
     return qsum(df, REV_COGS_W, quarters)
 
 def get_staff(df, quarters=("Q1","Q2","Q3","Q4")):
-    """Берём готовую колонку ИТОГО StaffCost; если её нет — сумму трёх компонент."""
     if df is None or df.empty:
         return 0.0
     if f"{STF_TOTAL}_Q1" in df.columns:
@@ -213,7 +212,6 @@ def filter_by_sbu(df, sbu):
     return df[df["SBU"] == sbu]
 
 def split_by_type(df):
-    """Возвращает dict: Backlog / Pipeline / GAP -> подмножество df."""
     out = {"Backlog": pd.DataFrame(), "Pipeline": pd.DataFrame(), "GAP": pd.DataFrame()}
     if df is None or df.empty or DEAL_TYPE not in df.columns:
         return out
@@ -275,7 +273,7 @@ rev_all, stf_all, errs = load_all_snapshots(tuple(selected_paths))
 for e in errs:
     st.sidebar.warning(e)
 if rev_all.empty:
-    st.error("Не найдены данные по выручке (листы Rev_*)."); st.stop()
+    st.error("Не найдены данные по выручке (листы Revenue/Rev_*)."); st.stop()
 
 by_list = ["Все"] + sorted(rev_all["SBU"].dropna().astype(str).unique().tolist())
 selected_by = st.sidebar.selectbox("Бизнес-юнит (БЮ)", by_list)
@@ -289,7 +287,7 @@ cogs_total = get_cogs(rev)
 staff_total = get_staff(stf)
 direct_total = staff_total + cogs_total
 gp3_total = rev_total - direct_total
-sga_total = 0.0  # в новой структуре SGA нет
+sga_total = 0.0
 ebitda_total = gp3_total - sga_total
 gm_pct_total = (gp3_total / rev_total * 100) if rev_total else 0.0
 
