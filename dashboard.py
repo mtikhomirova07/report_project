@@ -290,6 +290,8 @@ st.sidebar.caption(f"Сравнение с BR: {prev_br_key}" if comparison else
 st.sidebar.markdown("---")
 st.sidebar.header("Фильтры")
 rev_all, stf_all, errs = load_all_snapshots(tuple(selected_paths))
+st.write("--- ОТЛАДКА: Список всех колонок ---")
+st.write(rev_all.columns.tolist())
 for e in errs:
     st.sidebar.warning(e)
 if rev_all.empty:
