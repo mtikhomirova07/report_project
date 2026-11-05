@@ -111,7 +111,6 @@ def read_excel_with_header(path, sheet_name):
     data = data.dropna(how="all").reset_index(drop=True)
 
     if "Revenue" in sheet_name or "Rev_" in sheet_name:
-        # ИСПРАВЛЕНО: вернули ссылку на место (4-я колонка), Менеджера нет в файле
         expected_cols = [
             "SBU", "Заказчик", "Название", "Ссылка", "Признак_XT", 
             "Вероятность", "Backlog_Pipeline", 
@@ -314,6 +313,14 @@ sga_total = 0.0
 ebitda_total = gp3_total - sga_total
 gm_pct_total = (gp3_total / rev_total * 100) if rev_total else 0.0
 
+# Бюджет (фейковый: -5% от прогноза)
+budget_rev = rev_total * 0.95 if rev_total else None
+budget_staff = staff_total * 0.95 if staff_total else None
+budget_cogs = cogs_total * 0.95 if cogs_total else None
+budget_direct = budget_staff + budget_cogs if budget_staff is not None and budget_cogs is not None else None
+budget_gp3 = budget_rev - budget_direct if budget_rev is not None and budget_direct is not None else None
+budget_ebitda = budget_gp3 - sga_total if budget_gp3 is not None else None
+
 types = split_by_type(rev)
 rev_backlog = get_rev(types["Backlog"])
 rev_pipeline = get_rev(types["Pipeline"])
@@ -367,26 +374,52 @@ rows = [
 table_data = []
 for r in rows:
     name, p, pr = r["Показатель"], r["Prev. BR"], r["Прогноз"]
+    
+    # Фейковый бюджет: прогноз -5% (для всех строк, кроме GM%)
+    if name == "GM%":
+        b = None
+    elif name == "Revenue":
+        b = budget_rev
+    elif name == "Прямые расходы":
+        b = budget_direct
+    elif name == "StaffCost":
+        b = budget_staff
+    elif name == "COGS":
+        b = budget_cogs
+    elif name == "GP3":
+        b = budget_gp3
+    elif name == "EBITDA":
+        b = budget_ebitda
+    else:
+        b = pr * 0.95 if pr else None
+
     if name == "GM%":
         d_abs, d_pct = pr - p, pr - p
     else:
         d_abs = pr - p
         d_pct = (d_abs / p * 100) if p else 0.0
+        
+    db_abs = (pr - b) if (b is not None and pr is not None) else None
+    db_pct = (db_abs / b * 100) if (b not in (None, 0) and db_abs is not None) else None
+    
     table_data.append({
-        "Показатель": name, "Бюджет": None, "Prev. BR": p,
+        "Показатель": name, "Бюджет": b, "Prev. BR": p,
         "Q1": pr/4, "Q2": pr/4, "Q3": pr/4, "Q4": pr/4,
         "Факт YTD": None, "Прогноз": pr,
-        "Δ бюджет": None, "Δ бюджет, %": None,
+        "Δ бюджет": db_abs, "Δ бюджет, %": round(db_pct, 1) if db_pct is not None else None,
         "Δ Prev. BR": d_abs, "Δ Prev. BR, %": round(d_pct, 1),
     })
 
 total_pr = rev_total + direct_total + sga_total
 total_prev = (p_rev + p_direct + p_sga) if comparison else None
+total_budget = budget_rev + budget_direct + sga_total if budget_rev is not None else None
+
 table_data.append({
-    "Показатель": "ИТОГО (ключевые)", "Бюджет": None, "Prev. BR": total_prev,
+    "Показатель": "ИТОГО (ключевые)", "Бюджет": total_budget, "Prev. BR": total_prev,
     "Q1": total_pr/4, "Q2": total_pr/4, "Q3": total_pr/4, "Q4": total_pr/4,
     "Факт YTD": None, "Прогноз": total_pr,
-    "Δ бюджет": None, "Δ бюджет, %": None,
+    "Δ бюджет": (total_pr - total_budget) if total_budget else None,
+    "Δ бюджет, %": round(((total_pr - total_budget)/total_budget*100), 1) if total_budget else None,
     "Δ Prev. BR": (total_pr - total_prev) if total_prev else None,
     "Δ Prev. BR, %": round(((total_pr - total_prev)/total_prev*100), 1) if total_prev else None,
 })
