@@ -405,7 +405,7 @@ for r in rows:
     table_data.append({
         "Показатель": name, "Бюджет": b, "Prev. BR": p,
         "Q1": pr/4, "Q2": pr/4, "Q3": pr/4, "Q4": pr/4,
-        "Факт YTD": None, "Прогноз": pr,
+        "Прогноз": pr,
         "Δ бюджет": db_abs, "Δ бюджет, %": round(db_pct, 1) if db_pct is not None else None,
         "Δ Prev. BR": d_abs, "Δ Prev. BR, %": round(d_pct, 1),
     })
@@ -417,7 +417,7 @@ total_budget = budget_rev + budget_direct + sga_total if budget_rev is not None 
 table_data.append({
     "Показатель": "ИТОГО (ключевые)", "Бюджет": total_budget, "Prev. BR": total_prev,
     "Q1": total_pr/4, "Q2": total_pr/4, "Q3": total_pr/4, "Q4": total_pr/4,
-    "Факт YTD": None, "Прогноз": total_pr,
+    "Прогноз": total_pr,
     "Δ бюджет": (total_pr - total_budget) if total_budget else None,
     "Δ бюджет, %": round(((total_pr - total_budget)/total_budget*100), 1) if total_budget else None,
     "Δ Prev. BR": (total_pr - total_prev) if total_prev else None,
@@ -434,7 +434,7 @@ def _fmt_cell(row, col):
         return fmt_pct(v, 1)
     return fmt_num(v, 0)
 
-for col in ["Бюджет","Prev. BR","Q1","Q2","Q3","Q4","Факт YTD","Прогноз","Δ бюджет","Δ Prev. BR"]:
+for col in ["Бюджет","Prev. BR","Q1","Q2","Q3","Q4","Прогноз","Δ бюджет","Δ Prev. BR"]:
     display_table[col] = display_table.apply(lambda r, c=col: _fmt_cell(r, c), axis=1)
 for col in ["Δ бюджет, %","Δ Prev. BR, %"]:
     display_table[col] = display_table.apply(
@@ -464,7 +464,7 @@ gb.configure_default_column(resizable=True, sortable=True, filterable=False)
 gb.configure_column("Показатель", width=200, pinned="left", cellStyle={"textAlign":"left"})
 num_style = {"textAlign":"right","fontFamily":"monospace"}
 for c, w in [("Бюджет",110),("Prev. BR",110),("Q1",130),("Q2",130),("Q3",130),("Q4",130),
-             ("Факт YTD",130),("Прогноз",140)]:
+             ("Прогноз",140)]:
     gb.configure_column(c, width=w, cellStyle=num_style)
 for c in ["Δ бюджет","Δ бюджет, %","Δ Prev. BR","Δ Prev. BR, %"]:
     gb.configure_column(c, width=120, cellStyle=_STYLE_JS)
