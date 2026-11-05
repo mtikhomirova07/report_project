@@ -226,7 +226,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         display["Δ Вероятность"] = display["Δ Вероятность"].apply(lambda x: f"+{x}%" if x > 0 else f"{x}%" if x < 0 else "0%")
 
         all_concept_cols = [
-            "Название", "SBU", "Менеджер", "Клиент", 
+            "Название", "SBU", "Клиент", 
             "Тип_сделки", "Сумма_сделки", "Δ Сумма сделки", 
             "Статус", "Вероятность", "Δ Вероятность",
         ]

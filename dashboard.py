@@ -111,8 +111,9 @@ def read_excel_with_header(path, sheet_name):
     data = data.dropna(how="all").reset_index(drop=True)
 
     if "Revenue" in sheet_name or "Rev_" in sheet_name:
+        # ИСПРАВЛЕНО: вернули ссылку на место (4-я колонка), Менеджера нет в файле
         expected_cols = [
-            "SBU", "Заказчик", "Название", "Менеджер", "Признак_XT", 
+            "SBU", "Заказчик", "Название", "Ссылка", "Признак_XT", 
             "Вероятность", "Backlog_Pipeline", 
             "Невзвешенная_Q1", "Невзвешенная_Q2", "Невзвешенная_Q3", "Невзвешенная_Q4",
             "COGS_Q1", "COGS_Q2", "COGS_Q3", "COGS_Q4",
