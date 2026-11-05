@@ -44,6 +44,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
 
     deals = deals.copy()
 
+    # Подменяем имена колонок, если они отличаются
     rename_map = {
         "Backlog_Pipeline": "Тип_сделки",
         "Заказчик": "Клиент",
@@ -61,6 +62,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     if "Вероятность" not in deals.columns:
         deals["Вероятность"] = 0.0
 
+    # Безопасный подсчет суммы сделки
     if "Взвешенная_Q1" in deals.columns:
         q_cols = ["Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4"]
         for c in q_cols:
@@ -89,15 +91,16 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        managers = ["Все"] + sorted(deals["Менеджер"].dropna().unique().tolist())
+        # ФИКС: приведение к строкам, чтобы sorted() не падал
+        managers = ["Все"] + sorted(deals["Менеджер"].dropna().astype(str).unique().tolist())
         st.selectbox("Менеджер", managers, key="deals_manager")
 
     with col2:
-        types = ["Все"] + sorted(deals["Тип_сделки"].dropna().unique().tolist())
+        types = ["Все"] + sorted(deals["Тип_сделки"].dropna().astype(str).unique().tolist())
         st.selectbox("Тип сделки", types, key="deals_type")
 
     with col3:
-        statuses = ["Все"] + sorted(deals["Статус"].dropna().unique().tolist())
+        statuses = ["Все"] + sorted(deals["Статус"].dropna().astype(str).unique().tolist())
         st.selectbox("Статус", statuses, key="deals_status")
         
     with col4:
@@ -123,13 +126,13 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     is_fraction = max_prob <= 1.0 if pd.notna(max_prob) else True
 
     if sel_manager != "Все":
-        filtered_deals = filtered_deals[filtered_deals["Менеджер"] == sel_manager]
+        filtered_deals = filtered_deals[filtered_deals["Менеджер"].astype(str) == sel_manager]
 
     if sel_type != "Все":
-        filtered_deals = filtered_deals[filtered_deals["Тип_сделки"] == sel_type]
+        filtered_deals = filtered_deals[filtered_deals["Тип_сделки"].astype(str) == sel_type]
 
     if sel_status != "Все":
-        filtered_deals = filtered_deals[filtered_deals["Статус"] == sel_status]
+        filtered_deals = filtered_deals[filtered_deals["Статус"].astype(str) == sel_status]
 
     if sel_probs:
         prob_col = filtered_deals["Вероятность"] * 100 if is_fraction else filtered_deals["Вероятность"]
@@ -138,6 +141,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         prob_col = filtered_deals["Вероятность"] * 100 if is_fraction else filtered_deals["Вероятность"]
         filtered_deals = filtered_deals[prob_col.round(0) > 0]
 
+    # Сравнение с предыдущим BR
     if comparison_deals is not None and not comparison_deals.empty:
         comparison_deals = comparison_deals.copy()
         
