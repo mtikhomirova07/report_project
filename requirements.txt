@@ -7,3 +7,4 @@ openpyxl
 requests
 yadisk
 pyarrow
+python-calamine

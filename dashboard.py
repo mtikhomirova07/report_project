@@ -105,7 +105,7 @@ def read_excel_with_header(path, sheet_name):
     'Взвешенная выручка, без НДС, руб._Q1'.
     """
     try:
-        df = pd.read_excel(path, sheet_name=sheet_name, header=None)
+        df = pd.read_excel(path, sheet_name=sheet_name, header=None, engine="calamine")
     except Exception:
         return pd.DataFrame()
     if df.empty:
