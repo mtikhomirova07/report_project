@@ -276,7 +276,12 @@ for e in errs:
 if rev_all.empty:
     st.error("Не найдены данные по выручке."); st.stop()
 
-by_list = ["Все"] + sorted(rev_all["SBU"].dropna().astype(str).unique().tolist())
+by_list = ["Все"]
+sbus = rev_all["SBU"].dropna().astype(str).unique().tolist()
+for sbu in sorted(sbus):
+    if sbu.strip() != "":
+        by_list.append(sbu)
+
 selected_by = st.sidebar.selectbox("Бизнес-юнит (БЮ)", by_list)
 
 rev = filter_by_sbu(rev_all, selected_by)
