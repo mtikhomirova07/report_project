@@ -57,9 +57,12 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     if "Вероятность" not in deals.columns:
         deals["Вероятность"] = 0
 
-    # [FIX] Считаем сумму сделки как Q1+Q2+Q3+Q4
+        # [FIX] Считаем сумму сделки как Q1+Q2+Q3+Q4
     q_cols = [c for c in ["Q1", "Q2", "Q3", "Q4"] if c in deals.columns]
     if q_cols:
+        # Превращаем все текстовые значения (включая "#######") в числа или 0
+        for c in q_cols:
+            deals[c] = pd.to_numeric(deals[c].astype(str).str.replace(" ", "").str.replace(",", "."), errors="coerce").fillna(0)
         deals["Сумма_сделки"] = deals[q_cols].sum(axis=1)
 
     ctx = (selected_by, selected_date)

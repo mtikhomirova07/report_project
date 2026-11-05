@@ -140,10 +140,8 @@ def read_excel_with_header(path, sheet_name):
     data.columns = cols
     data = data.dropna(how="all").reset_index(drop=True)
     
-    # Принудительно убираем пробелы из названий колонок
     data.columns = [str(c).strip() for c in data.columns]
 
-    # Чистим проценты в колонке "Вероятность"
     if "Вероятность" in data.columns:
         data["Вероятность"] = data["Вероятность"].astype(str).str.replace("%", "").str.replace(",", ".")
         data["Вероятность"] = pd.to_numeric(data["Вероятность"], errors="coerce").fillna(0)
@@ -169,7 +167,6 @@ def load_all_snapshots(paths):
                 if d.empty:
                     continue
                 
-                # Если колонки SBU нет, берем первую колонку и называем её SBU
                 if "SBU" not in d.columns:
                     first_col = d.columns[0]
                     d = d.rename(columns={first_col: "SBU"})
@@ -183,50 +180,63 @@ def load_all_snapshots(paths):
     stf = pd.concat(staff_parts, ignore_index=True) if staff_parts else pd.DataFrame()
     return rev, stf, errors
 
-# Имена колонок-источников
-REV_W = "Взвешенная выручка, без НДС, руб."
-REV_COGS_W = "Взвешенные COGS, без НДС, руб."
-STF_TOTAL = "ИТОГО StaffCost, гросс, руб"
-STF_FOT = "Прогноз ФОТ Гросс, руб, без учета соц. части"
-STF_BONUS = "Резерв на премии, гросс, руб"
-STF_EXTRA = "Доп расходы на персонал, гросс, руб"
-DEAL_TYPE = "Backlog / Pipeline"
+# --- ДИНАМИЧЕСКИЙ ПОИСК КОЛОНОК ---
+def find_col(df, keyword):
+    if df is None or df.empty:
+        return None
+    for col in df.columns:
+        if keyword.lower() in str(col).lower():
+            return col
+    return None
 
-def qsum(df, prefix, quarters=("Q1", "Q2", "Q3", "Q4")):
+def qsum(df, keyword, quarters=("Q1", "Q2", "Q3", "Q4")):
     if df is None or df.empty:
         return 0.0
+    col_base = find_col(df, keyword)
+    if not col_base:
+        return 0.0
+    
     total = 0.0
     for q in quarters:
-        col = f"{prefix}_{q}"
+        col = f"{col_base}_{q}"
         if col in df.columns:
             total += pd.to_numeric(df[col], errors="coerce").fillna(0).sum()
     return float(total)
 
 def get_rev(df, quarters=("Q1","Q2","Q3","Q4")):
-    return qsum(df, REV_W, quarters)
+    return qsum(df, "Взвешенная выручка", quarters)
 
 def get_cogs(df, quarters=("Q1","Q2","Q3","Q4")):
-    return qsum(df, REV_COGS_W, quarters)
+    return qsum(df, "Взвешенные COGS", quarters)
 
 def get_staff(df, quarters=("Q1","Q2","Q3","Q4")):
     if df is None or df.empty:
         return 0.0
-    if f"{STF_TOTAL}_Q1" in df.columns:
-        return qsum(df, STF_TOTAL, quarters)
-    return (qsum(df, STF_FOT, quarters)
-            + qsum(df, STF_BONUS, quarters)
-            + qsum(df, STF_EXTRA, quarters))
+    total = qsum(df, "ИТОГО StaffCost", quarters)
+    if total > 0:
+        return total
+    return (qsum(df, "Прогноз ФОТ", quarters)
+            + qsum(df, "Резерв на премии", quarters)
+            + qsum(df, "Доп расходы", quarters))
 
 def filter_by_sbu(df, sbu):
     if df is None or df.empty or sbu == "Все" or "SBU" not in df.columns:
         return df
     return df[df["SBU"] == sbu]
 
+DEAL_TYPE = "Backlog / Pipeline"
+
 def split_by_type(df):
     out = {"Backlog": pd.DataFrame(), "Pipeline": pd.DataFrame(), "GAP": pd.DataFrame()}
-    if df is None or df.empty or DEAL_TYPE not in df.columns:
+    if df is None or df.empty:
         return out
-    t = df[DEAL_TYPE].astype(str).str.strip().str.title()
+    col_type = find_col(df, "Backlog")
+    if not col_type:
+        col_type = "Тип_сделки" if "Тип_сделки" in df.columns else None
+    if not col_type or col_type not in df.columns:
+        return out
+    
+    t = df[col_type].astype(str).str.strip().str.title()
     for k in out:
         out[k] = df[t == k.title()]
     return out
@@ -234,8 +244,7 @@ def split_by_type(df):
 # --- САЙДБАР: ПЕРИОД / СТАТУС ---
 st.sidebar.markdown("---")
 st.sidebar.header("Период (→ PREV-BR)")
-group_labels = group_keys
-selected_key = st.sidebar.selectbox("Неделя", group_labels, index=0, label_visibility="collapsed")
+selected_key = st.sidebar.selectbox("Неделя", group_keys, index=0, label_visibility="collapsed")
 selected_paths = snapshot_groups[selected_key]
 
 st.sidebar.markdown("---")
@@ -284,7 +293,7 @@ rev_all, stf_all, errs = load_all_snapshots(tuple(selected_paths))
 for e in errs:
     st.sidebar.warning(e)
 if rev_all.empty:
-    st.error("Не найдены данные по выручке (листы Revenue/Rev_*)."); st.stop()
+    st.error("Не найдены данные по выручке."); st.stop()
 
 by_list = ["Все"] + sorted(rev_all["SBU"].dropna().astype(str).unique().tolist())
 selected_by = st.sidebar.selectbox("Бизнес-юнит (БЮ)", by_list)
@@ -346,10 +355,6 @@ st.title("Управленческая отчётность")
 st.caption(f"Отчёт от {selected_key} | БЮ: {selected_by} | Единицы: руб. (без НДС)")
 st.markdown("---")
 st.subheader("P&L по статьям")
-if comparison:
-    st.caption(f"**Режим сравнения:** `Прогноз` сравнивается с BR **{prev_br_key}**.")
-else:
-    st.caption("Сравнение не выбрано. В новой структуре нет колонок «Бюджет» и «Факт YTD» — они показаны как «—».")
 
 def make_row(name, prev, pr, indent=False):
     return {
@@ -382,23 +387,17 @@ for r in rows:
         d_abs = pr - p
         d_pct = (d_abs / p * 100) if p else 0.0
     table_data.append({
-        "Показатель": name,
-        "Бюджет": None,
-        "Prev. BR": p,
+        "Показатель": name, "Бюджет": None, "Prev. BR": p,
         "Q1": pr/4, "Q2": pr/4, "Q3": pr/4, "Q4": pr/4,
-        "Факт YTD": None,
-        "Прогноз": pr,
-        "Δ бюджет": None,
-        "Δ бюджет, %": None,
-        "Δ Prev. BR": d_abs,
-        "Δ Prev. BR, %": round(d_pct, 1),
+        "Факт YTD": None, "Прогноз": pr,
+        "Δ бюджет": None, "Δ бюджет, %": None,
+        "Δ Prev. BR": d_abs, "Δ Prev. BR, %": round(d_pct, 1),
     })
 
 total_pr = rev_total + direct_total + sga_total
 total_prev = (p_rev + p_direct + p_sga) if comparison else None
 table_data.append({
-    "Показатель": "ИТОГО (ключевые)",
-    "Бюджет": None, "Prev. BR": total_prev,
+    "Показатель": "ИТОГО (ключевые)", "Бюджет": None, "Prev. BR": total_prev,
     "Q1": total_pr/4, "Q2": total_pr/4, "Q3": total_pr/4, "Q4": total_pr/4,
     "Факт YTD": None, "Прогноз": total_pr,
     "Δ бюджет": None, "Δ бюджет, %": None,
@@ -518,17 +517,12 @@ for key in group_keys:
     wg = wr - wd
     wt = split_by_type(w_rev)
     week_dyn.append({
-        "Неделя": key,
-        "Revenue": wr,
+        "Неделя": key, "Revenue": wr,
         "Revenue_Backlog": get_rev(wt["Backlog"]),
         "Revenue_Pipeline": get_rev(wt["Pipeline"]),
         "Revenue_Extra_GAP": get_rev(wt["GAP"]),
-        "StaffCost": ws,
-        "COGS": wc,
-        "Прямые расходы": wd,
-        "SGA": 0.0,
-        "GP3": wg,
-        "EBITDA": wg,
+        "StaffCost": ws, "COGS": wc, "Прямые расходы": wd,
+        "SGA": 0.0, "GP3": wg, "EBITDA": wg,
     })
 
 if week_dyn:
