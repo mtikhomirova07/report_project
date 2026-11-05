@@ -35,6 +35,19 @@ def style_deals(df):
     return css
 
 def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_num, fmt_pct):
+    # CSS-хак, чтобы убрать кнопку "Select all" в выпадающих списках
+    st.markdown("""
+        <style>
+            [data-testid="stMultiSelect"] span[data-baseweb="tag"] + div + div button {
+                display: none !important;
+            }
+            /* Более надежный вариант: скрываем кнопку по aria-label */
+            button[aria-label="Select all"] {
+                display: none !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
     st.title("Сделки")
     st.caption("Фильтр по статусу — выберите нужный в фильтрах ниже.")
 
@@ -51,13 +64,10 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     }
     deals = deals.rename(columns=rename_map)
 
-    required_cols = ["Менеджер", "Тип_сделки", "Статус", "Вероятность"]
+    required_cols = ["Тип_сделки", "Вероятность"]
     for col in required_cols:
         if col not in deals.columns:
             deals[col] = "—"
-
-    if "Статус" not in deals.columns:
-        deals["Статус"] = "В работе"
 
     if "Вероятность" not in deals.columns:
         deals["Вероятность"] = 0.0
@@ -82,41 +92,38 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     st.subheader("Фильтры")
 
     def reset_filters():
-        st.session_state["deals_manager"] = "Все"
         st.session_state["deals_type"] = "Все"
-        st.session_state["deals_status"] = "Все"
         st.session_state["deals_probs"] = []
         st.session_state["deals_page"] = 1
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
-        # ФИКС: приведение к строкам, чтобы sorted() не падал
-        managers = ["Все"] + sorted(deals["Менеджер"].dropna().astype(str).unique().tolist())
-        st.selectbox("Менеджер", managers, key="deals_manager")
-
-    with col2:
-        types = ["Все"] + sorted(deals["Тип_сделки"].dropna().astype(str).unique().tolist())
+        # Оставляем только Pipeline, Backlog, GAP
+        valid_types = ["Backlog", "Pipeline", "GAP"]
+        deals["Тип_сделки"] = deals["Тип_сделки"].astype(str).str.strip().str.title()
+        found_types = [t for t in valid_types if t in deals["Тип_сделки"].unique()]
+        
+        types = ["Все"] + found_types
         st.selectbox("Тип сделки", types, key="deals_type")
 
-    with col3:
-        statuses = ["Все"] + sorted(deals["Статус"].dropna().astype(str).unique().tolist())
-        st.selectbox("Статус", statuses, key="deals_status")
-        
-    with col4:
+    with col2:
         prob_options = [1, 25, 40, 60, 80, 100]
+        # Параметр select_all не поддерживается нативно, поэтому работает CSS выше
         st.multiselect(
             "Вероятность сделки", 
             options=prob_options, 
             key="deals_probs", 
             placeholder="Все вероятности",
         )
+        
+    with col3:
+        # Фильтр "Статус" скрыт (в данных нет колонки статуса)
+        st.selectbox("Статус", ["Все"], key="deals_status", disabled=True)
 
     st.button("Сбросить фильтры", on_click=reset_filters)
 
-    sel_manager = st.session_state.get("deals_manager", "Все")
     sel_type = st.session_state.get("deals_type", "Все")
-    sel_status = st.session_state.get("deals_status", "Все")
     sel_probs = st.session_state.get("deals_probs", [])
 
     filtered_deals = deals.copy()
@@ -125,14 +132,8 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     max_prob = filtered_deals["Вероятность"].max()
     is_fraction = max_prob <= 1.0 if pd.notna(max_prob) else True
 
-    if sel_manager != "Все":
-        filtered_deals = filtered_deals[filtered_deals["Менеджер"].astype(str) == sel_manager]
-
     if sel_type != "Все":
-        filtered_deals = filtered_deals[filtered_deals["Тип_сделки"].astype(str) == sel_type]
-
-    if sel_status != "Все":
-        filtered_deals = filtered_deals[filtered_deals["Статус"].astype(str) == sel_status]
+        filtered_deals = filtered_deals[filtered_deals["Тип_сделки"] == sel_type]
 
     if sel_probs:
         prob_col = filtered_deals["Вероятность"] * 100 if is_fraction else filtered_deals["Вероятность"]
@@ -228,7 +229,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         all_concept_cols = [
             "Название", "SBU", "Клиент", 
             "Тип_сделки", "Сумма_сделки", "Δ Сумма сделки", 
-            "Статус", "Вероятность", "Δ Вероятность",
+            "Вероятность", "Δ Вероятность",
         ]
 
         cols_present = [c for c in all_concept_cols if c in display.columns]
