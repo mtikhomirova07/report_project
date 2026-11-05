@@ -97,7 +97,6 @@ def _norm(s: str) -> str:
 
 def read_excel_with_header(path, sheet_name):
     try:
-        # Используем calamine, чтобы обойти ошибки XML на Linux
         df = pd.read_excel(path, sheet_name=sheet_name, header=None, engine="calamine")
     except Exception:
         return pd.DataFrame()
@@ -141,7 +140,10 @@ def read_excel_with_header(path, sheet_name):
     data.columns = cols
     data = data.dropna(how="all").reset_index(drop=True)
     
-    # Чистим проценты в колонке "Вероятность"
+    # ФИКС: Принудительно убираем пробелы из названий колонок
+    data.columns = [str(c).strip() for c in data.columns]
+
+    # ФИКС: Чистим проценты в колонке "Вероятность"
     if "Вероятность" in data.columns:
         data["Вероятность"] = data["Вероятность"].astype(str).str.replace("%", "").str.replace(",", ".")
         data["Вероятность"] = pd.to_numeric(data["Вероятность"], errors="coerce").fillna(0)
@@ -158,21 +160,29 @@ def load_all_snapshots(paths):
             errors.append(f"{path}: {e}")
             continue
         for sh in xls.sheet_names:
-            # Проверяем и старое (Rev_), и новое (Revenue) название листа
             if sh.startswith("Rev_") or sh == "Revenue":
                 d = read_excel_with_header(path, sh)
                 if not d.empty:
+                    # ФИКС: Гарантируем, что колонка называется ровно "SBU"
+                    for col in d.columns:
+                        if str(col).strip().upper() == "SBU":
+                            d = d.rename(columns={col: "SBU"})
+                            break
                     rev_parts.append(d)
             elif sh.startswith("Staff_") or sh == "StaffCost":
                 d = read_excel_with_header(path, sh)
                 if not d.empty:
+                    for col in d.columns:
+                        if str(col).strip().upper() == "SBU":
+                            d = d.rename(columns={col: "SBU"})
+                            break
                     staff_parts.append(d)
                     
     rev = pd.concat(rev_parts, ignore_index=True) if rev_parts else pd.DataFrame()
     stf = pd.concat(staff_parts, ignore_index=True) if staff_parts else pd.DataFrame()
     return rev, stf, errors
 
-# Имена колонок-источников (после нормализации)
+# Имена колонок-источников
 REV_W = "Взвешенная выручка, без НДС, руб."
 REV_COGS_W = "Взвешенные COGS, без НДС, руб."
 STF_TOTAL = "ИТОГО StaffCost, гросс, руб"
