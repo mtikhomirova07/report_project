@@ -35,23 +35,6 @@ def style_deals(df):
     return css
 
 def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_num, fmt_pct):
-    # CSS: скрываем кнопку "Select all" в multiselect
-    st.markdown("""
-        <style>
-            /* Скрываем кнопку "Select all" в выпадающем списке multiselect */
-            div[data-baseweb="popover"] div[role="listbox"] > div:first-child:has(button) {
-                display: none !important;
-            }
-            /* Альтернативный селектор на случай, если первый не сработает */
-            div[data-baseweb="popover"] button[kind="secondary"] {
-                display: none !important;
-            }
-            button[aria-label="Select all"] {
-                display: none !important;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-
     st.title("Сделки")
     st.caption("Фильтр по статусу — выберите нужный в фильтрах ниже.")
 
@@ -88,7 +71,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
 
     ctx = (selected_by, selected_date)
     if st.session_state.get("_deals_ctx") != ctx:
-        for k in ["deals_manager", "deals_type", "deals_status", "deals_probs", "deals_by"]:
+        for k in ["deals_type", "deals_status", "deals_prob_single", "deals_by"]:
             st.session_state.pop(k, None)
         st.session_state["_deals_ctx"] = ctx
         st.session_state["deals_page"] = 1
@@ -97,7 +80,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
 
     def reset_filters():
         st.session_state["deals_type"] = "Все"
-        st.session_state["deals_probs"] = []
+        st.session_state["deals_prob_single"] = "Все"
         st.session_state["deals_page"] = 1
 
     col1, col2, col3 = st.columns(3)
@@ -112,14 +95,9 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         st.selectbox("Тип сделки", types, key="deals_type")
 
     with col2:
-        prob_options = [1, 25, 40, 60, 80, 100]
-        # Параметр select_all не поддерживается нативно, поэтому работает CSS выше
-        st.multiselect(
-            "Вероятность сделки", 
-            options=prob_options, 
-            key="deals_probs", 
-            placeholder="Все вероятности",
-        )
+        # Заменили multiselect на selectbox, чтобы убрать "Select all"
+        prob_options = ["Все", 1, 25, 40, 60, 80, 100]
+        st.selectbox("Вероятность сделки", prob_options, key="deals_prob_single")
         
     with col3:
         # Фильтр "Статус" скрыт (в данных нет колонки статуса)
@@ -128,7 +106,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     st.button("Сбросить фильтры", on_click=reset_filters)
 
     sel_type = st.session_state.get("deals_type", "Все")
-    sel_probs = st.session_state.get("deals_probs", [])
+    sel_prob = st.session_state.get("deals_prob_single", "Все")
 
     filtered_deals = deals.copy()
     filtered_deals['Вероятность'] = pd.to_numeric(filtered_deals['Вероятность'], errors='coerce').fillna(0)
@@ -139,11 +117,10 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     if sel_type != "Все":
         filtered_deals = filtered_deals[filtered_deals["Тип_сделки"] == sel_type]
 
-    if sel_probs:
-        prob_col = filtered_deals["Вероятность"] * 100 if is_fraction else filtered_deals["Вероятность"]
-        filtered_deals = filtered_deals[prob_col.round(0).isin(sel_probs)]
+    prob_col = filtered_deals["Вероятность"] * 100 if is_fraction else filtered_deals["Вероятность"]
+    if sel_prob != "Все":
+        filtered_deals = filtered_deals[prob_col.round(0) == sel_prob]
     else:
-        prob_col = filtered_deals["Вероятность"] * 100 if is_fraction else filtered_deals["Вероятность"]
         filtered_deals = filtered_deals[prob_col.round(0) > 0]
 
     # Сравнение с предыдущим BR
