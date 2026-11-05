@@ -57,7 +57,8 @@ def fmt_pct(value, decimals=1):
     return f"−{formatted}%" if value < 0 else f"+{formatted}%" if value > 0 else f"{formatted}%"
 
 # --- АВТОЗАГРУЗКА / ОБНОВЛЕНИЕ ---
-if not glob.glob(str(SNAPSHOTS_DIR / "*.xlsx")):
+# ИЗМЕНЕНО: добавлен ** и recursive=True для поиска файлов в подпапках
+if not glob.glob(str(SNAPSHOTS_DIR / "**" / "*.xlsx"), recursive=True):
     with st.spinner("Первый запуск. Загружаю данные..."):
         from loader import update_data
         ok, msg = update_data()
@@ -76,14 +77,17 @@ if st.sidebar.button("🔄 Обновить данные", width="stretch"):
         st.sidebar.error(f"Ошибка: {msg}")
 
 # --- ГРУППИРОВКА СНИМКОВ ---
-snapshot_files = sorted(glob.glob(str(SNAPSHOTS_DIR / "*.xlsx")), reverse=True)
+# ИЗМЕНЕНО: добавлен ** и recursive=True для поиска файлов в подпапках
+snapshot_files = sorted(glob.glob(str(SNAPSHOTS_DIR / "**" / "*.xlsx"), recursive=True), reverse=True)
 if not snapshot_files:
     st.error("Нет снимков."); st.stop()
 
 snapshot_groups = {}
 for f in snapshot_files:
+    # ИЗМЕНЕНО: используем родительскую папку как ключ, если в имени файла нет ключа недели
     stem = Path(f).stem
-    m = re.search(r"(2026-W\d+)", stem)
+    parent_dir = Path(f).parent.name
+    m = re.search(r"(2026-W\d+)", stem) or re.search(r"(2026-W\d+)", parent_dir)
     key = m.group(1) if m else stem
     snapshot_groups.setdefault(key, []).append(f)
 group_keys = sorted(snapshot_groups.keys(), reverse=True)
