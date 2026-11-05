@@ -118,7 +118,8 @@ def read_excel_with_header(path, sheet_name):
             "COGS_Q1", "COGS_Q2", "COGS_Q3", "COGS_Q4",
             "Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4",
             "Взвешенные_COGS_Q1", "Взвешенные_COGS_Q2", "Взвешенные_COGS_Q3", "Взвешенные_COGS_Q4",
-            "Rev2027", "Cogs2027", "H2_GM1", "Проект", "ОПП", "GM3"
+            "Rev2027", "Cogs2027", "H2_GM1", "Проект", "ОПП", "GM3",
+            "Менеджер", "Статус"
         ]
     else:
         expected_cols = [
@@ -423,8 +424,8 @@ gb = GridOptionsBuilder.from_dataframe(display_table)
 gb.configure_default_column(resizable=True, sortable=True, filterable=False)
 gb.configure_column("Показатель", width=200, pinned="left", cellStyle={"textAlign":"left"})
 num_style = {"textAlign":"right","fontFamily":"monospace"}
-for c, w in [("Бюджет",110),("Prev. BR",110),("Q1",90),("Q2",90),("Q3",90),("Q4",90),
-             ("Факт YTD",110),("Прогноз",110)]:
+for c, w in [("Бюджет",110),("Prev. BR",110),("Q1",130),("Q2",130),("Q3",130),("Q4",130),
+             ("Факт YTD",130),("Прогноз",140)]:
     gb.configure_column(c, width=w, cellStyle=num_style)
 for c in ["Δ бюджет","Δ бюджет, %","Δ Prev. BR","Δ Prev. BR, %"]:
     gb.configure_column(c, width=120, cellStyle=_STYLE_JS)

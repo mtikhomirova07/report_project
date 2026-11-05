@@ -44,7 +44,6 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
 
     deals = deals.copy()
 
-    # Подменяем имена колонок, если они отличаются
     rename_map = {
         "Backlog_Pipeline": "Тип_сделки",
         "Заказчик": "Клиент",
@@ -62,7 +61,6 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     if "Вероятность" not in deals.columns:
         deals["Вероятность"] = 0.0
 
-    # Безопасный подсчет суммы сделки (берем из взвешенных колонок)
     if "Взвешенная_Q1" in deals.columns:
         q_cols = ["Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4"]
         for c in q_cols:
@@ -140,7 +138,6 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         prob_col = filtered_deals["Вероятность"] * 100 if is_fraction else filtered_deals["Вероятность"]
         filtered_deals = filtered_deals[prob_col.round(0) > 0]
 
-    # Сравнение с предыдущим BR
     if comparison_deals is not None and not comparison_deals.empty:
         comparison_deals = comparison_deals.copy()
         
