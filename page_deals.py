@@ -18,7 +18,6 @@ def style_deals(df):
         except:
             return 0
 
-    # Красим Δ Сумма сделки, Δ Q1..Q4
     delta_cols = ["Δ Сумма сделки", "Δ Q1", "Δ Q2", "Δ Q3", "Δ Q4"]
     for col in delta_cols:
         if col in df.columns:
@@ -235,7 +234,6 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
             display["Вероятность"] = display["Вероятность"].round(0)
         display["Вероятность"] = display["Вероятность"].fillna(0).astype(int)
 
-        # Порядок колонок (по заданию)
         cols = [
             "Название", "Клиент", "Менеджер", "Тип_сделки",
             "Сумма_сделки", "Вероятность", "Взвешенная_выручка",
@@ -250,6 +248,8 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         numeric_cols = [c for c in display.columns if c.startswith("Взвешенная") or c.startswith("Δ") or c in ["Сумма_сделки"]]
         for c in numeric_cols:
             if c in display.columns:
+                # Сначала превращаем в число (убираем NaN), затем форматируем
+                display[c] = pd.to_numeric(display[c], errors="coerce").fillna(0)
                 display[c] = display[c].apply(lambda v: fmt_num(v, 0))
 
         df_display = display[cols_present]
