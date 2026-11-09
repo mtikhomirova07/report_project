@@ -44,10 +44,13 @@ def parse_timestamp(ts):
     except Exception:
         return datetime.min
 
-def fmt_num(value, decimals=0):
+def fmt_num(value, decimals=0, with_sign=False):
+    """Форматирует число. Если with_sign=True, добавляет '+' или '−'."""
     if pd.isna(value) or value is None:
         return "—"
     formatted = f"{abs(value):,.{decimals}f}".replace(",", " ")
+    if with_sign:
+        return f"−{formatted}" if value < 0 else f"+{formatted}" if value > 0 else formatted
     return f"−{formatted}" if value < 0 else formatted
 
 def fmt_pct(value, decimals=1):
@@ -89,7 +92,7 @@ for f in snapshot_files:
     snapshot_groups.setdefault(key, []).append(f)
 group_keys = sorted(snapshot_groups.keys(), reverse=True)
 
-# --- ЧТЕНИЕ EXCEL С ЖЕСТКИМИ КОЛОНКАМИ ---
+# --- ЧТЕНИЕ EXCEL ---
 def read_excel_with_header(path, sheet_name):
     try:
         df = pd.read_excel(path, sheet_name=sheet_name, header=None, engine="calamine")
@@ -349,33 +352,35 @@ st.caption(f"Отчёт от {selected_key} | БЮ: {selected_by} | Единиц
 st.markdown("---")
 st.subheader("P&L по статьям")
 
-def make_row(name, prev, pr, indent=False):
+def make_row(name, prev, pr, fact=None, indent=False):
     return {
         "Показатель": ("    — " + name) if indent else name,
         "Prev. BR": prev,
         "Q1": pr / 4, "Q2": pr / 4, "Q3": pr / 4, "Q4": pr / 4,
+        "Факт YTD": fact,  # <-- Возвращаем колонку (пока None)
         "Прогноз": pr,
     }
 
+# Факт пока пустой (None), так как реальных данных нет
 rows = [
-    make_row("Revenue", p_rev, rev_total),
-    make_row("Backlog", p_backlog, rev_backlog, indent=True),
-    make_row("Pipeline", p_pipeline, rev_pipeline, indent=True),
-    make_row("Extra GAP", p_gap, rev_gap, indent=True),
-    make_row("Прямые расходы", p_direct, direct_total),
-    make_row("StaffCost", p_staff, staff_total, indent=True),
-    make_row("COGS", p_cogs, cogs_total, indent=True),
-    make_row("GP3", p_gp3, gp3_total),
-    make_row("GM%", p_gm, gm_pct_total),
-    make_row("SGA", p_sga, sga_total),
-    make_row("EBITDA", p_ebitda, ebitda_total),
+    make_row("Revenue", p_rev, rev_total, None),
+    make_row("Backlog", p_backlog, rev_backlog, None, indent=True),
+    make_row("Pipeline", p_pipeline, rev_pipeline, None, indent=True),
+    make_row("Extra GAP", p_gap, rev_gap, None, indent=True),
+    make_row("Прямые расходы", p_direct, direct_total, None),
+    make_row("StaffCost", p_staff, staff_total, None, indent=True),
+    make_row("COGS", p_cogs, cogs_total, None, indent=True),
+    make_row("GP3", p_gp3, gp3_total, None),
+    make_row("GM%", p_gm, gm_pct_total, None),
+    make_row("SGA", p_sga, sga_total, None),
+    make_row("EBITDA", p_ebitda, ebitda_total, None),
 ]
 
 table_data = []
 for r in rows:
-    name, p, pr = r["Показатель"], r["Prev. BR"], r["Прогноз"]
+    name, p, pr, f = r["Показатель"], r["Prev. BR"], r["Прогноз"], r["Факт YTD"]
     
-    # Фейковый бюджет: прогноз -5% (для всех строк, кроме GM%)
+    # Бюджет
     if name == "GM%":
         b = None
     elif name == "Revenue":
@@ -405,6 +410,7 @@ for r in rows:
     table_data.append({
         "Показатель": name, "Бюджет": b, "Prev. BR": p,
         "Q1": pr/4, "Q2": pr/4, "Q3": pr/4, "Q4": pr/4,
+        "Факт YTD": f,  # <-- Колонка на месте, пустая
         "Прогноз": pr,
         "Δ бюджет": db_abs, "Δ бюджет, %": round(db_pct, 1) if db_pct is not None else None,
         "Δ Prev. BR": d_abs, "Δ Prev. BR, %": round(d_pct, 1),
@@ -417,6 +423,7 @@ total_budget = budget_rev + budget_direct + sga_total if budget_rev is not None 
 table_data.append({
     "Показатель": "ИТОГО (ключевые)", "Бюджет": total_budget, "Prev. BR": total_prev,
     "Q1": total_pr/4, "Q2": total_pr/4, "Q3": total_pr/4, "Q4": total_pr/4,
+    "Факт YTD": None,
     "Прогноз": total_pr,
     "Δ бюджет": (total_pr - total_budget) if total_budget else None,
     "Δ бюджет, %": round(((total_pr - total_budget)/total_budget*100), 1) if total_budget else None,
@@ -432,9 +439,12 @@ def _fmt_cell(row, col):
         return "—"
     if row["Показатель"] == "GM%":
         return fmt_pct(v, 1)
+    # Для Δ бюджет и Δ Prev. BR (абсолютные) — без плюса
+    if col in ["Δ бюджет", "Δ Prev. BR"]:
+        return fmt_num(v, 0, with_sign=False)
     return fmt_num(v, 0)
 
-for col in ["Бюджет","Prev. BR","Q1","Q2","Q3","Q4","Прогноз","Δ бюджет","Δ Prev. BR"]:
+for col in ["Бюджет","Prev. BR","Q1","Q2","Q3","Q4","Факт YTD","Прогноз","Δ бюджет","Δ Prev. BR"]:
     display_table[col] = display_table.apply(lambda r, c=col: _fmt_cell(r, c), axis=1)
 for col in ["Δ бюджет, %","Δ Prev. BR, %"]:
     display_table[col] = display_table.apply(
@@ -464,7 +474,7 @@ gb.configure_default_column(resizable=True, sortable=True, filterable=False)
 gb.configure_column("Показатель", width=200, pinned="left", cellStyle={"textAlign":"left"})
 num_style = {"textAlign":"right","fontFamily":"monospace"}
 for c, w in [("Бюджет",110),("Prev. BR",110),("Q1",130),("Q2",130),("Q3",130),("Q4",130),
-             ("Прогноз",140)]:
+             ("Факт YTD",130),("Прогноз",140)]:
     gb.configure_column(c, width=w, cellStyle=num_style)
 for c in ["Δ бюджет","Δ бюджет, %","Δ Prev. BR","Δ Prev. BR, %"]:
     gb.configure_column(c, width=120, cellStyle=_STYLE_JS)
