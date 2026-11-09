@@ -45,7 +45,6 @@ def parse_timestamp(ts):
         return datetime.min
 
 def fmt_num(value, decimals=0, with_sign=False):
-    """Форматирует число. Если with_sign=True, добавляет '+' или '−'."""
     if pd.isna(value) or value is None:
         return "—"
     formatted = f"{abs(value):,.{decimals}f}".replace(",", " ")
@@ -92,7 +91,7 @@ for f in snapshot_files:
     snapshot_groups.setdefault(key, []).append(f)
 group_keys = sorted(snapshot_groups.keys(), reverse=True)
 
-# --- ЧТЕНИЕ EXCEL ---
+# --- ЧТЕНИЕ EXCEL С ФАКТОМ ---
 def read_excel_with_header(path, sheet_name):
     try:
         df = pd.read_excel(path, sheet_name=sheet_name, header=None, engine="calamine")
@@ -122,7 +121,7 @@ def read_excel_with_header(path, sheet_name):
             "Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4",
             "Взвешенные_COGS_Q1", "Взвешенные_COGS_Q2", "Взвешенные_COGS_Q3", "Взвешенные_COGS_Q4",
             "Rev2027", "Cogs2027", "H2_GM1", "Проект", "ОПП", "GM3",
-            "Статус"
+            "Факт_Q1", "Факт_Q2"
         ]
     else:
         expected_cols = [
@@ -208,6 +207,13 @@ def get_staff(df, quarters=("Q1","Q2","Q3","Q4")):
         col = f"ИТОГО_{q}"
         if col in df.columns:
             total += df[col].sum()
+    return float(total)
+
+def get_fact(df):
+    total = 0.0
+    for col in ["Факт_Q1", "Факт_Q2"]:
+        if col in df.columns:
+            total += pd.to_numeric(df[col], errors="coerce").fillna(0).sum()
     return float(total)
 
 def filter_by_sbu(df, sbu):
@@ -317,17 +323,25 @@ ebitda_total = gp3_total - sga_total
 gm_pct_total = (gp3_total / rev_total * 100) if rev_total else 0.0
 
 # Бюджет (фейковый: -5% от прогноза)
-budget_rev = rev_total * 0.95 if rev_total else None
-budget_staff = staff_total * 0.95 if staff_total else None
-budget_cogs = cogs_total * 0.95 if cogs_total else None
-budget_direct = budget_staff + budget_cogs if budget_staff is not None and budget_cogs is not None else None
-budget_gp3 = budget_rev - budget_direct if budget_rev is not None and budget_direct is not None else None
-budget_ebitda = budget_gp3 - sga_total if budget_gp3 is not None else None
+budget_rev = rev_total * 0.95 if rev_total else 0.0
+budget_staff = staff_total * 0.95 if staff_total else 0.0
+budget_cogs = cogs_total * 0.95 if cogs_total else 0.0
+budget_direct = budget_staff + budget_cogs
+budget_gp3 = budget_rev - budget_direct
+budget_ebitda = budget_gp3 - sga_total
 
 types = split_by_type(rev)
 rev_backlog = get_rev(types["Backlog"])
 rev_pipeline = get_rev(types["Pipeline"])
 rev_gap = get_rev(types["GAP"])
+
+# ФАКТ
+rev_fact = get_fact(rev)
+cogs_fact = get_fact(rev)  # Пока используем тот же факт для COGS (или можно разделить)
+staff_fact = get_fact(stf) if not stf.empty else 0.0
+direct_fact = staff_fact + cogs_fact
+gp3_fact = rev_fact - direct_fact
+ebitda_fact = gp3_fact - sga_total
 
 # --- PREV BR ---
 if comparison:
@@ -357,30 +371,28 @@ def make_row(name, prev, pr, fact=None, indent=False):
         "Показатель": ("    — " + name) if indent else name,
         "Prev. BR": prev,
         "Q1": pr / 4, "Q2": pr / 4, "Q3": pr / 4, "Q4": pr / 4,
-        "Факт YTD": fact,  # <-- Возвращаем колонку (пока None)
+        "Факт YTD": fact,
         "Прогноз": pr,
     }
 
-# Факт пока пустой (None), так как реальных данных нет
 rows = [
-    make_row("Revenue", p_rev, rev_total, None),
+    make_row("Revenue", p_rev, rev_total, rev_fact),
     make_row("Backlog", p_backlog, rev_backlog, None, indent=True),
     make_row("Pipeline", p_pipeline, rev_pipeline, None, indent=True),
     make_row("Extra GAP", p_gap, rev_gap, None, indent=True),
-    make_row("Прямые расходы", p_direct, direct_total, None),
-    make_row("StaffCost", p_staff, staff_total, None, indent=True),
-    make_row("COGS", p_cogs, cogs_total, None, indent=True),
-    make_row("GP3", p_gp3, gp3_total, None),
+    make_row("Прямые расходы", p_direct, direct_total, direct_fact),
+    make_row("StaffCost", p_staff, staff_total, staff_fact, indent=True),
+    make_row("COGS", p_cogs, cogs_total, cogs_fact, indent=True),
+    make_row("GP3", p_gp3, gp3_total, gp3_fact),
     make_row("GM%", p_gm, gm_pct_total, None),
     make_row("SGA", p_sga, sga_total, None),
-    make_row("EBITDA", p_ebitda, ebitda_total, None),
+    make_row("EBITDA", p_ebitda, ebitda_total, ebitda_fact),
 ]
 
 table_data = []
 for r in rows:
     name, p, pr, f = r["Показатель"], r["Prev. BR"], r["Прогноз"], r["Факт YTD"]
     
-    # Бюджет
     if name == "GM%":
         b = None
     elif name == "Revenue":
@@ -396,7 +408,7 @@ for r in rows:
     elif name == "EBITDA":
         b = budget_ebitda
     else:
-        b = pr * 0.95 if pr else None
+        b = pr * 0.95 if pr else 0.0
 
     if name == "GM%":
         d_abs, d_pct = pr - p, pr - p
@@ -410,7 +422,7 @@ for r in rows:
     table_data.append({
         "Показатель": name, "Бюджет": b, "Prev. BR": p,
         "Q1": pr/4, "Q2": pr/4, "Q3": pr/4, "Q4": pr/4,
-        "Факт YTD": f,  # <-- Колонка на месте, пустая
+        "Факт YTD": f,
         "Прогноз": pr,
         "Δ бюджет": db_abs, "Δ бюджет, %": round(db_pct, 1) if db_pct is not None else None,
         "Δ Prev. BR": d_abs, "Δ Prev. BR, %": round(d_pct, 1),
@@ -418,12 +430,13 @@ for r in rows:
 
 total_pr = rev_total + direct_total + sga_total
 total_prev = (p_rev + p_direct + p_sga) if comparison else None
-total_budget = budget_rev + budget_direct + sga_total if budget_rev is not None else None
+total_budget = budget_rev + budget_direct + sga_total
+total_fact = rev_fact + direct_fact + sga_total
 
 table_data.append({
     "Показатель": "ИТОГО (ключевые)", "Бюджет": total_budget, "Prev. BR": total_prev,
     "Q1": total_pr/4, "Q2": total_pr/4, "Q3": total_pr/4, "Q4": total_pr/4,
-    "Факт YTD": None,
+    "Факт YTD": total_fact,
     "Прогноз": total_pr,
     "Δ бюджет": (total_pr - total_budget) if total_budget else None,
     "Δ бюджет, %": round(((total_pr - total_budget)/total_budget*100), 1) if total_budget else None,
@@ -439,7 +452,6 @@ def _fmt_cell(row, col):
         return "—"
     if row["Показатель"] == "GM%":
         return fmt_pct(v, 1)
-    # Для Δ бюджет и Δ Prev. BR (абсолютные) — без плюса
     if col in ["Δ бюджет", "Δ Prev. BR"]:
         return fmt_num(v, 0, with_sign=False)
     return fmt_num(v, 0)
