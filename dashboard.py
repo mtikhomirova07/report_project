@@ -89,7 +89,7 @@ for f in snapshot_files:
     snapshot_groups.setdefault(key, []).append(f)
 group_keys = sorted(snapshot_groups.keys(), reverse=True)
 
-# --- ЧТЕНИЕ EXCEL С ФАКТОМ ---
+# --- ЧТЕНИЕ EXCEL С ЖЕСТКИМИ КОЛОНКАМИ ---
 def read_excel_with_header(path, sheet_name):
     try:
         df = pd.read_excel(path, sheet_name=sheet_name, header=None, engine="calamine")
@@ -111,22 +111,15 @@ def read_excel_with_header(path, sheet_name):
     data = data.dropna(how="all").reset_index(drop=True)
 
     if "Revenue" in sheet_name or "Rev_" in sheet_name:
-        # Блоки: Невзвешенная (8-11), COGS (12-15), Взвешенная (16-19), Взвешенные COGS (20-23)
-        # В каждом блоке: Q1(Факт), Q2(Факт), Q3(Прогноз), Q4(Прогноз)
         expected_cols = [
             "SBU", "Заказчик", "Название", "Ссылка", "Признак_XT", 
             "Вероятность", "Backlog_Pipeline", 
-            # Невзвешенная выручка
-            "Невзвешенная_Q1_Факт", "Невзвешенная_Q2_Факт", "Невзвешенная_Q3_Прогноз", "Невзвешенная_Q4_Прогноз",
-            # COGS
-            "COGS_Q1_Факт", "COGS_Q2_Факт", "COGS_Q3_Прогноз", "COGS_Q4_Прогноз",
-            # Взвешенная выручка
-            "Взвешенная_Q1_Факт", "Взвешенная_Q2_Факт", "Взвешенная_Q3_Прогноз", "Взвешенная_Q4_Прогноз",
-            # Взвешенные COGS
-            "Взвешенные_COGS_Q1_Факт", "Взвешенные_COGS_Q2_Факт", "Взвешенные_COGS_Q3_Прогноз", "Взвешенные_COGS_Q4_Прогноз",
-            # Доп. колонки (как в файле)
-            "H2_2026_WAvg", "H2_2026_COGS_WAvg", "H2_GM1_WAvg", "Взвешенная_выручка_доп",
-            "Rev2027", "Cogs2027", "Проект", "ОПП", "GM3", "Статус"
+            "Невзвешенная_Q1", "Невзвешенная_Q2", "Невзвешенная_Q3", "Невзвешенная_Q4",
+            "COGS_Q1", "COGS_Q2", "COGS_Q3", "COGS_Q4",
+            "Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4",
+            "Взвешенные_COGS_Q1", "Взвешенные_COGS_Q2", "Взвешенные_COGS_Q3", "Взвешенные_COGS_Q4",
+            "Rev2027", "Cogs2027", "H2_GM1", "Проект", "ОПП", "GM3",
+            "Статус"
         ]
     else:
         expected_cols = [
@@ -153,7 +146,7 @@ def read_excel_with_header(path, sheet_name):
     for col in data.columns:
         if "_Q" in col:
             data[col] = pd.to_numeric(
-                data[col].astype(str).str.replace("₽", "").str.replace(" ", "").str.replace(",", ".").replace("-", ""),
+                data[col].astype(str).str.replace("₽", "").str.replace(" ", "").str.replace(",", "."),
                 errors="coerce"
             ).fillna(0)
 
@@ -188,45 +181,27 @@ def load_all_snapshots(paths):
     return rev, stf, errors
 
 # --- ФУНКЦИИ РАСЧЕТА ---
-def get_rev_fact(df):
-    """Факт (Q1+Q2) по взвешенной выручке."""
+def get_rev(df, quarters=("Q1","Q2","Q3","Q4")):
     total = 0.0
-    for q in ["Q1", "Q2"]:
-        col = f"Взвешенная_{q}_Факт"
+    for q in quarters:
+        col = f"Взвешенная_{q}"
         if col in df.columns:
             total += df[col].sum()
     return float(total)
 
-def get_rev_prognoz(df):
-    """Прогноз (Q3+Q4) по взвешенной выручке."""
+def get_cogs(df, quarters=("Q1","Q2","Q3","Q4")):
     total = 0.0
-    for q in ["Q3", "Q4"]:
-        col = f"Взвешенная_{q}_Прогноз"
+    for q in quarters:
+        col = f"Взвешенные_COGS_{q}"
         if col in df.columns:
             total += df[col].sum()
     return float(total)
 
-def get_cogs_fact(df):
-    total = 0.0
-    for q in ["Q1", "Q2"]:
-        col = f"Взвешенные_COGS_{q}_Факт"
-        if col in df.columns:
-            total += df[col].sum()
-    return float(total)
-
-def get_cogs_prognoz(df):
-    total = 0.0
-    for q in ["Q3", "Q4"]:
-        col = f"Взвешенные_COGS_{q}_Прогноз"
-        if col in df.columns:
-            total += df[col].sum()
-    return float(total)
-
-def get_staff(df):
+def get_staff(df, quarters=("Q1","Q2","Q3","Q4")):
     if df is None or df.empty:
         return 0.0
     total = 0.0
-    for q in ["Q1", "Q2", "Q3", "Q4"]:
+    for q in quarters:
         col = f"ИТОГО_{q}"
         if col in df.columns:
             total += df[col].sum()
@@ -329,114 +304,122 @@ if page == "Сделки":
     st.stop()
 
 # --- ТЕКУЩИЕ ИТОГИ ---
-rev_fact = get_rev_fact(rev)
-rev_prog = get_rev_prognoz(rev)
-rev_total = rev_fact + rev_prog
-
-cogs_fact = get_cogs_fact(rev)
-cogs_prog = get_cogs_prognoz(rev)
-cogs_total = cogs_fact + cogs_prog
-
+rev_total = get_rev(rev)
+cogs_total = get_cogs(rev)
 staff_total = get_staff(stf)
 direct_total = staff_total + cogs_total
-direct_fact = staff_total + cogs_fact  # Условно считаем весь staff фактом
-
 gp3_total = rev_total - direct_total
-gp3_fact = rev_fact - direct_fact
-ebitda_total = gp3_total
-ebitda_fact = gp3_fact
+sga_total = 0.0
+ebitda_total = gp3_total - sga_total
 gm_pct_total = (gp3_total / rev_total * 100) if rev_total else 0.0
-gm_pct_fact = (gp3_fact / rev_fact * 100) if rev_fact else 0.0
+
+# Бюджет (фейковый: -5% от прогноза)
+budget_rev = rev_total * 0.95 if rev_total else None
+budget_staff = staff_total * 0.95 if staff_total else None
+budget_cogs = cogs_total * 0.95 if cogs_total else None
+budget_direct = budget_staff + budget_cogs if budget_staff is not None and budget_cogs is not None else None
+budget_gp3 = budget_rev - budget_direct if budget_rev is not None and budget_direct is not None else None
+budget_ebitda = budget_gp3 - sga_total if budget_gp3 is not None else None
 
 types = split_by_type(rev)
-rev_backlog_fact = get_rev_fact(types["Backlog"])
-rev_backlog_prog = get_rev_prognoz(types["Backlog"])
-rev_backlog_total = rev_backlog_fact + rev_backlog_prog
-
-rev_pipeline_fact = get_rev_fact(types["Pipeline"])
-rev_pipeline_prog = get_rev_prognoz(types["Pipeline"])
-rev_pipeline_total = rev_pipeline_fact + rev_pipeline_prog
-
-rev_gap_fact = get_rev_fact(types["GAP"])
-rev_gap_prog = get_rev_prognoz(types["GAP"])
-rev_gap_total = rev_gap_fact + rev_gap_prog
+rev_backlog = get_rev(types["Backlog"])
+rev_pipeline = get_rev(types["Pipeline"])
+rev_gap = get_rev(types["GAP"])
 
 # --- PREV BR ---
 if comparison:
     comp_rev = filter_by_sbu(comparison[0], selected_by)
     comp_stf = filter_by_sbu(comparison[1], selected_by)
-    
-    p_rev = get_rev_fact(comp_rev) + get_rev_prognoz(comp_rev)
-    p_cogs = get_cogs_fact(comp_rev) + get_cogs_prognoz(comp_rev)
+    p_rev = get_rev(comp_rev)
+    p_cogs = get_cogs(comp_rev)
     p_staff = get_staff(comp_stf)
     p_direct = p_staff + p_cogs
     p_gp3 = p_rev - p_direct
-    p_ebitda = p_gp3
+    p_sga = 0.0
+    p_ebitda = p_gp3 - p_sga
     p_gm = (p_gp3 / p_rev * 100) if p_rev else 0.0
+    ct = split_by_type(comp_rev)
+    p_backlog, p_pipeline, p_gap = get_rev(ct["Backlog"]), get_rev(ct["Pipeline"]), get_rev(ct["GAP"])
 else:
-    p_rev = p_cogs = p_staff = p_direct = p_gp3 = p_ebitda = p_gm = 0.0
+    p_rev = p_cogs = p_staff = p_direct = p_gp3 = p_sga = p_ebitda = p_gm = 0.0
+    p_backlog = p_pipeline = p_gap = 0.0
 
 st.title("Управленческая отчётность")
 st.caption(f"Отчёт от {selected_key} | БЮ: {selected_by} | Единицы: руб. (без НДС)")
 st.markdown("---")
 st.subheader("P&L по статьям")
 
-def make_row(name, prev, pr, fact=None, indent=False):
+def make_row(name, prev, pr, indent=False):
     return {
         "Показатель": ("    — " + name) if indent else name,
         "Prev. BR": prev,
         "Q1": pr / 4, "Q2": pr / 4, "Q3": pr / 4, "Q4": pr / 4,
-        "Факт YTD": fact,
         "Прогноз": pr,
     }
 
-# Формируем строки. Для факта передаем рассчитанные значения
 rows = [
-    make_row("Revenue", p_rev, rev_total, rev_fact),
-    make_row("Backlog", 0.0, rev_backlog_total, rev_backlog_fact, indent=True),
-    make_row("Pipeline", 0.0, rev_pipeline_total, rev_pipeline_fact, indent=True),
-    make_row("Extra GAP", 0.0, rev_gap_total, rev_gap_fact, indent=True),
-    make_row("Прямые расходы", p_direct, direct_total, direct_fact),
-    make_row("StaffCost", 0.0, staff_total, staff_total, indent=True),
-    make_row("COGS", 0.0, cogs_total, cogs_fact, indent=True),
-    make_row("GP3", p_gp3, gp3_total, gp3_fact),
-    make_row("GM%", p_gm, gm_pct_total, gm_pct_fact),
-    make_row("SGA", 0.0, 0.0, 0.0),
-    make_row("EBITDA", p_ebitda, ebitda_total, ebitda_fact),
+    make_row("Revenue", p_rev, rev_total),
+    make_row("Backlog", p_backlog, rev_backlog, indent=True),
+    make_row("Pipeline", p_pipeline, rev_pipeline, indent=True),
+    make_row("Extra GAP", p_gap, rev_gap, indent=True),
+    make_row("Прямые расходы", p_direct, direct_total),
+    make_row("StaffCost", p_staff, staff_total, indent=True),
+    make_row("COGS", p_cogs, cogs_total, indent=True),
+    make_row("GP3", p_gp3, gp3_total),
+    make_row("GM%", p_gm, gm_pct_total),
+    make_row("SGA", p_sga, sga_total),
+    make_row("EBITDA", p_ebitda, ebitda_total),
 ]
 
 table_data = []
 for r in rows:
-    name, p, pr, f = r["Показатель"], r["Prev. BR"], r["Прогноз"], r["Факт YTD"]
+    name, p, pr = r["Показатель"], r["Prev. BR"], r["Прогноз"]
     
-    # Бюджет не нужен (мы его удалили или оставили пустым), но если нужно - тут логика
-    b = None
-    
+    # Фейковый бюджет: прогноз -5% (для всех строк, кроме GM%)
+    if name == "GM%":
+        b = None
+    elif name == "Revenue":
+        b = budget_rev
+    elif name == "Прямые расходы":
+        b = budget_direct
+    elif name == "StaffCost":
+        b = budget_staff
+    elif name == "COGS":
+        b = budget_cogs
+    elif name == "GP3":
+        b = budget_gp3
+    elif name == "EBITDA":
+        b = budget_ebitda
+    else:
+        b = pr * 0.95 if pr else None
+
     if name == "GM%":
         d_abs, d_pct = pr - p, pr - p
     else:
         d_abs = pr - p
         d_pct = (d_abs / p * 100) if p else 0.0
-
+        
+    db_abs = (pr - b) if (b is not None and pr is not None) else None
+    db_pct = (db_abs / b * 100) if (b not in (None, 0) and db_abs is not None) else None
+    
     table_data.append({
         "Показатель": name, "Бюджет": b, "Prev. BR": p,
         "Q1": pr/4, "Q2": pr/4, "Q3": pr/4, "Q4": pr/4,
-        "Факт YTD": f,
         "Прогноз": pr,
-        "Δ бюджет": None, "Δ бюджет, %": None,
+        "Δ бюджет": db_abs, "Δ бюджет, %": round(db_pct, 1) if db_pct is not None else None,
         "Δ Prev. BR": d_abs, "Δ Prev. BR, %": round(d_pct, 1),
     })
 
-total_pr = rev_total + direct_total
-total_prev = (p_rev + p_direct) if comparison else None
-total_fact = rev_fact + direct_fact
+total_pr = rev_total + direct_total + sga_total
+total_prev = (p_rev + p_direct + p_sga) if comparison else None
+total_budget = budget_rev + budget_direct + sga_total if budget_rev is not None else None
 
 table_data.append({
-    "Показатель": "ИТОГО (ключевые)", "Бюджет": None, "Prev. BR": total_prev,
+    "Показатель": "ИТОГО (ключевые)", "Бюджет": total_budget, "Prev. BR": total_prev,
     "Q1": total_pr/4, "Q2": total_pr/4, "Q3": total_pr/4, "Q4": total_pr/4,
-    "Факт YTD": total_fact,
     "Прогноз": total_pr,
-    "Δ бюджет": None, "Δ бюджет, %": None,
+    "Δ бюджет": (total_pr - total_budget) if total_budget else None,
+    "Δ бюджет, %": round(((total_pr - total_budget)/total_budget*100), 1) if total_budget else None,
     "Δ Prev. BR": (total_pr - total_prev) if total_prev else None,
     "Δ Prev. BR, %": round(((total_pr - total_prev)/total_prev*100), 1) if total_prev else None,
 })
@@ -451,7 +434,7 @@ def _fmt_cell(row, col):
         return fmt_pct(v, 1)
     return fmt_num(v, 0)
 
-for col in ["Бюджет","Prev. BR","Q1","Q2","Q3","Q4","Факт YTD","Прогноз","Δ бюджет","Δ Prev. BR"]:
+for col in ["Бюджет","Prev. BR","Q1","Q2","Q3","Q4","Прогноз","Δ бюджет","Δ Prev. BR"]:
     display_table[col] = display_table.apply(lambda r, c=col: _fmt_cell(r, c), axis=1)
 for col in ["Δ бюджет, %","Δ Prev. BR, %"]:
     display_table[col] = display_table.apply(
@@ -481,7 +464,7 @@ gb.configure_default_column(resizable=True, sortable=True, filterable=False)
 gb.configure_column("Показатель", width=200, pinned="left", cellStyle={"textAlign":"left"})
 num_style = {"textAlign":"right","fontFamily":"monospace"}
 for c, w in [("Бюджет",110),("Prev. BR",110),("Q1",130),("Q2",130),("Q3",130),("Q4",130),
-             ("Факт YTD",130),("Прогноз",140)]:
+             ("Прогноз",140)]:
     gb.configure_column(c, width=w, cellStyle=num_style)
 for c in ["Δ бюджет","Δ бюджет, %","Δ Prev. BR","Δ Prev. BR, %"]:
     gb.configure_column(c, width=120, cellStyle=_STYLE_JS)
@@ -511,6 +494,82 @@ with pd.ExcelWriter(buf, engine="openpyxl") as w:
 st.download_button("Скачать отчёт в Excel", data=buf.getvalue(),
                    file_name=f"report_{selected_key}.xlsx", width="stretch")
 
-# ... Дальше идут блоки "Детализация по кварталам" и "Динамика по неделям" ...
-# Они остаются без изменений, так как логика расчета кварталов не поменялась.
-# Для краткости я их не дублирую.
+st.markdown("---")
+st.subheader("Детализация по кварталам")
+months_by_quarter = {"Q1":["Январь","Февраль","Март"],"Q2":["Апрель","Май","Июнь"],
+                     "Q3":["Июль","Август","Сентябрь"],"Q4":["Октябрь","Ноябрь","Декабрь"]}
+for q_label, months in months_by_quarter.items():
+    with st.expander(f"{q_label} ({months[0]} — {months[-1]})", expanded=False):
+        mrows = []
+        for r in rows:
+            name, q_val = r["Показатель"], r[q_label]
+            mv = q_val / 3
+            if name == "GM%":
+                mrows.append({"Показатель": name,
+                              months[0]: fmt_pct(q_val,1), months[1]: fmt_pct(q_val,1),
+                              months[2]: fmt_pct(q_val,1), f"Итого {q_label}": fmt_pct(q_val,1)})
+            else:
+                mrows.append({"Показатель": name,
+                              months[0]: fmt_num(mv,0), months[1]: fmt_num(mv,0),
+                              months[2]: fmt_num(mv,0), f"Итого {q_label}": fmt_num(q_val,0)})
+        st.dataframe(pd.DataFrame(mrows).style.apply(zebra_style, axis=None).hide(axis="index"),
+                     width="stretch", height=350)
+
+st.markdown("---")
+st.subheader("Динамика по неделям")
+dyn_metric = st.radio("Что показывать",
+    ["Revenue (общая)","Revenue (по типам)","Прямые расходы","SGA","GP3","EBITDA"],
+    horizontal=True, key="dyn_metric")
+
+week_dyn = []
+for key in group_keys:
+    try:
+        w_rev, w_stf, _ = load_all_snapshots(tuple(snapshot_groups[key]))
+    except Exception:
+        continue
+    w_rev = filter_by_sbu(w_rev, selected_by)
+    w_stf = filter_by_sbu(w_stf, selected_by)
+    wr = get_rev(w_rev)
+    wc = get_cogs(w_rev)
+    ws = get_staff(w_stf)
+    wd = ws + wc
+    wg = wr - wd
+    wt = split_by_type(w_rev)
+    week_dyn.append({
+        "Неделя": key, "Revenue": wr,
+        "Revenue_Backlog": get_rev(wt["Backlog"]),
+        "Revenue_Pipeline": get_rev(wt["Pipeline"]),
+        "Revenue_Extra_GAP": get_rev(wt["GAP"]),
+        "StaffCost": ws, "COGS": wc, "Прямые расходы": wd,
+        "SGA": 0.0, "GP3": wg, "EBITDA": wg,
+    })
+
+if week_dyn:
+    dyn_df = pd.DataFrame(week_dyn).sort_values("Неделя")
+    if dyn_metric == "Revenue (общая)":
+        y, title = ["Revenue"], "Revenue по неделям"
+    elif dyn_metric == "Revenue (по типам)":
+        y, title = ["Revenue_Backlog","Revenue_Pipeline","Revenue_Extra_GAP"], "Revenue по типам"
+    elif dyn_metric == "Прямые расходы":
+        y, title = ["StaffCost","COGS"], "Прямые расходы: StaffCost vs COGS"
+    elif dyn_metric == "SGA":
+        y, title = ["SGA"], "SGA по неделям (в источнике отсутствует)"
+    elif dyn_metric == "GP3":
+        y, title = ["GP3"], "GP3 по неделям"
+    else:
+        y, title = ["EBITDA"], "EBITDA по неделям"
+
+    fig = px.line(dyn_df, x="Неделя", y=y, markers=True, title=title)
+    fig.update_layout(height=450,
+        xaxis=dict(tickformat="%d.%m", tickmode="array",
+                   tickvals=dyn_df["Неделя"], ticktext=dyn_df["Неделя"]),
+        yaxis=dict(tickformat="~s"))
+    st.plotly_chart(fig, width="stretch")
+
+    with st.expander("Показать данные по неделям"):
+        dd = dyn_df.copy()
+        for c in dd.columns:
+            if c != "Неделя":
+                dd[c] = dd[c].apply(lambda v: fmt_num(v, 0))
+        st.dataframe(dd.style.apply(zebra_style, axis=None).hide(axis="index"),
+                     width="stretch", height=350)
