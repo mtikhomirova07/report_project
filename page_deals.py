@@ -59,7 +59,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     max_prob = deals["Вероятность"].max()
     is_fraction = max_prob <= 1.0 if pd.notna(max_prob) else True
 
-    # Невзвешенная выручка (общая сумма по всем кварталам)
+    # Невзвешенная выручка (общая)
     if "Невзвешенная_Q1" in deals.columns:
         nv_cols = ["Невзвешенная_Q1", "Невзвешенная_Q2", "Невзвешенная_Q3", "Невзвешенная_Q4"]
         for c in nv_cols:
@@ -99,7 +99,6 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         st.session_state["deals_prob_single"] = "Все"
         st.session_state["deals_page"] = 1
 
-    # Фильтры: Менеджер, Тип сделки, Вероятность (без Статуса)
     col1, col2, col3 = st.columns(3)
 
     with col1:
@@ -233,15 +232,12 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
             display["Вероятность"] = display["Вероятность"].round(0)
         display["Вероятность"] = display["Вероятность"].fillna(0).astype(int)
 
-        # Порядок колонок
+        # ПРАВИЛЬНЫЙ порядок колонок (по заданию)
         cols = [
             "Название", "Клиент", "Менеджер", "Тип_сделки",
             "Невзвешенная_выручка", "Вероятность", "Взвешенная_выручка",
-            "Взвешенная_Q1", "Δ Q1",
-            "Взвешенная_Q2", "Δ Q2",
-            "Взвешенная_Q3", "Δ Q3",
-            "Взвешенная_Q4", "Δ Q4",
-            "Δ Сумма сделки",
+            "Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4",
+            "Δ Сумма сделки", "Δ Q1", "Δ Q2", "Δ Q3", "Δ Q4",
         ]
         cols_present = [c for c in cols if c in display.columns]
 
