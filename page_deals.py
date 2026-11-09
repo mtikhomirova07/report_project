@@ -1,5 +1,5 @@
 """
-Страница «Сделки» — реестр с фильтрами и пагинацией.
+Страница «Сделки» — реестр с фильтрами, кварталами и сравнением с Prev. BR.
 """
 import streamlit as st
 import pandas as pd
@@ -18,38 +18,20 @@ def style_deals(df):
         except:
             return 0
 
-    if 'Δ Сумма сделки' in df.columns:
-        for idx, val in df['Δ Сумма сделки'].items():
-            num_val = parse_val(val)
-            if num_val != 0:
-                color = '#1a7f37' if num_val > 0 else '#cf222e'
-                css.loc[idx, 'Δ Сумма сделки'] = f'color: {color}; font-weight: 600;'
-
-    if 'Δ Вероятность' in df.columns:
-        for idx, val in df['Δ Вероятность'].items():
-            num_val = parse_val(val)
-            if num_val != 0:
-                color = '#1a7f37' if num_val > 0 else '#cf222e'
-                css.loc[idx, 'Δ Вероятность'] = f'color: {color}; font-weight: 600;'
+    delta_cols = ["Δ Сумма сделки", "Δ Q1", "Δ Q2", "Δ Q3", "Δ Q4"]
+    for col in delta_cols:
+        if col in df.columns:
+            for idx, val in df[col].items():
+                num_val = parse_val(val)
+                if num_val != 0:
+                    color = '#1a7f37' if num_val > 0 else '#cf222e'
+                    css.loc[idx, col] = f'color: {color}; font-weight: 600;'
 
     return css
 
 def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_num, fmt_pct):
-    # CSS-хак, чтобы убрать кнопку "Select all" в выпадающих списках
-    st.markdown("""
-        <style>
-            [data-testid="stMultiSelect"] span[data-baseweb="tag"] + div + div button {
-                display: none !important;
-            }
-            /* Более надежный вариант: скрываем кнопку по aria-label */
-            button[aria-label="Select all"] {
-                display: none !important;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-
     st.title("Сделки")
-    st.caption("Фильтр по статусу — выберите нужный в фильтрах ниже.")
+    st.caption("Фильтры по менеджеру, типу сделки и вероятности.")
 
     if deals is None:
         st.error("Нет данных по сделкам.")
@@ -57,34 +39,54 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
 
     deals = deals.copy()
 
-    # Подменяем имена колонок, если они отличаются
     rename_map = {
         "Backlog_Pipeline": "Тип_сделки",
         "Заказчик": "Клиент",
     }
     deals = deals.rename(columns=rename_map)
 
-    required_cols = ["Тип_сделки", "Вероятность"]
-    for col in required_cols:
-        if col not in deals.columns:
-            deals[col] = "—"
+    # Заглушка для менеджера
+    if "Менеджер" not in deals.columns:
+        deals["Менеджер"] = "—"
+
+    if "Тип_сделки" not in deals.columns:
+        deals["Тип_сделки"] = "—"
 
     if "Вероятность" not in deals.columns:
         deals["Вероятность"] = 0.0
 
-    # Безопасный подсчет суммы сделки
-    if "Взвешенная_Q1" in deals.columns:
-        q_cols = ["Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4"]
-        for c in q_cols:
+    deals["Вероятность"] = pd.to_numeric(deals["Вероятность"], errors="coerce").fillna(0)
+    max_prob = deals["Вероятность"].max()
+    is_fraction = max_prob <= 1.0 if pd.notna(max_prob) else True
+
+    # Невзвешенная выручка (общая сумма по всем кварталам)
+    if "Невзвешенная_Q1" in deals.columns:
+        nv_cols = ["Невзвешенная_Q1", "Невзвешенная_Q2", "Невзвешенная_Q3", "Невзвешенная_Q4"]
+        for c in nv_cols:
             if c in deals.columns:
                 deals[c] = pd.to_numeric(deals[c], errors="coerce").fillna(0)
-        deals["Сумма_сделки"] = deals[[c for c in q_cols if c in deals.columns]].sum(axis=1)
+        deals["Невзвешенная_выручка"] = deals[[c for c in nv_cols if c in deals.columns]].sum(axis=1)
     else:
-        deals["Сумма_сделки"] = 0
+        deals["Невзвешенная_выручка"] = 0.0
+
+    # Взвешенная выручка (по кварталам + общая)
+    if "Взвешенная_Q1" in deals.columns:
+        w_cols = ["Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4"]
+        for c in w_cols:
+            if c in deals.columns:
+                deals[c] = pd.to_numeric(deals[c], errors="coerce").fillna(0)
+        deals["Взвешенная_выручка"] = deals[[c for c in w_cols if c in deals.columns]].sum(axis=1)
+    else:
+        deals["Взвешенная_выручка"] = 0.0
+        for q in ["Q1", "Q2", "Q3", "Q4"]:
+            deals[f"Взвешенная_{q}"] = 0.0
+
+    # Сумма сделки = Невзвешенная выручка
+    deals["Сумма_сделки"] = deals["Невзвешенная_выручка"]
 
     ctx = (selected_by, selected_date)
     if st.session_state.get("_deals_ctx") != ctx:
-        for k in ["deals_manager", "deals_type", "deals_status", "deals_probs", "deals_by"]:
+        for k in ["deals_manager", "deals_type", "deals_prob_single", "deals_page"]:
             st.session_state.pop(k, None)
         st.session_state["_deals_ctx"] = ctx
         st.session_state["deals_page"] = 1
@@ -92,99 +94,108 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     st.subheader("Фильтры")
 
     def reset_filters():
+        st.session_state["deals_manager"] = "Все"
         st.session_state["deals_type"] = "Все"
-        st.session_state["deals_probs"] = []
+        st.session_state["deals_prob_single"] = "Все"
         st.session_state["deals_page"] = 1
 
+    # Фильтры: Менеджер, Тип сделки, Вероятность (без Статуса)
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        # Оставляем только Pipeline, Backlog, GAP
+        managers = ["Все"] + sorted(deals["Менеджер"].dropna().astype(str).unique().tolist())
+        st.selectbox("Менеджер", managers, key="deals_manager")
+
+    with col2:
         valid_types = ["Backlog", "Pipeline", "GAP"]
         deals["Тип_сделки"] = deals["Тип_сделки"].astype(str).str.strip().str.title()
         found_types = [t for t in valid_types if t in deals["Тип_сделки"].unique()]
-        
         types = ["Все"] + found_types
         st.selectbox("Тип сделки", types, key="deals_type")
 
-    with col2:
-        prob_options = [1, 25, 40, 60, 80, 100]
-        # Параметр select_all не поддерживается нативно, поэтому работает CSS выше
-        st.multiselect(
-            "Вероятность сделки", 
-            options=prob_options, 
-            key="deals_probs", 
-            placeholder="Все вероятности",
-        )
-        
     with col3:
-        # Фильтр "Статус" скрыт (в данных нет колонки статуса)
-        st.selectbox("Статус", ["Все"], key="deals_status", disabled=True)
+        prob_options = ["Все", 1, 25, 40, 60, 80, 100]
+        st.selectbox("Вероятность сделки", prob_options, key="deals_prob_single")
 
     st.button("Сбросить фильтры", on_click=reset_filters)
 
+    sel_manager = st.session_state.get("deals_manager", "Все")
     sel_type = st.session_state.get("deals_type", "Все")
-    sel_probs = st.session_state.get("deals_probs", [])
+    sel_prob = st.session_state.get("deals_prob_single", "Все")
 
-    filtered_deals = deals.copy()
-    filtered_deals['Вероятность'] = pd.to_numeric(filtered_deals['Вероятность'], errors='coerce').fillna(0)
-    
-    max_prob = filtered_deals["Вероятность"].max()
-    is_fraction = max_prob <= 1.0 if pd.notna(max_prob) else True
+    filtered = deals.copy()
+
+    if sel_manager != "Все":
+        filtered = filtered[filtered["Менеджер"].astype(str) == sel_manager]
 
     if sel_type != "Все":
-        filtered_deals = filtered_deals[filtered_deals["Тип_сделки"] == sel_type]
+        filtered = filtered[filtered["Тип_сделки"] == sel_type]
 
-    if sel_probs:
-        prob_col = filtered_deals["Вероятность"] * 100 if is_fraction else filtered_deals["Вероятность"]
-        filtered_deals = filtered_deals[prob_col.round(0).isin(sel_probs)]
+    prob_col = filtered["Вероятность"] * 100 if is_fraction else filtered["Вероятность"]
+    if sel_prob != "Все":
+        filtered = filtered[prob_col.round(0) == sel_prob]
     else:
-        prob_col = filtered_deals["Вероятность"] * 100 if is_fraction else filtered_deals["Вероятность"]
-        filtered_deals = filtered_deals[prob_col.round(0) > 0]
+        filtered = filtered[prob_col.round(0) > 0]
 
     # Сравнение с предыдущим BR
     if comparison_deals is not None and not comparison_deals.empty:
-        comparison_deals = comparison_deals.copy()
-        
-        if "Взвешенная_Q1" in comparison_deals.columns:
-            comp_q_cols = ["Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4"]
-            for c in comp_q_cols:
-                if c in comparison_deals.columns:
-                    comparison_deals[c] = pd.to_numeric(comparison_deals[c], errors="coerce").fillna(0)
-            comparison_deals["Сумма_сделки"] = comparison_deals[[c for c in comp_q_cols if c in comparison_deals.columns]].sum(axis=1)
-        else:
-            comparison_deals["Сумма_сделки"] = 0
+        comp = comparison_deals.copy()
+        if "Backlog_Pipeline" in comp.columns:
+            comp = comp.rename(columns={"Backlog_Pipeline": "Тип_сделки"})
+        if "Заказчик" in comp.columns:
+            comp = comp.rename(columns={"Заказчик": "Клиент"})
             
-        if 'Вероятность' in comparison_deals.columns:
-            comparison_deals['Вероятность'] = pd.to_numeric(comparison_deals['Вероятность'], errors='coerce').fillna(0)
+        if "Невзвешенная_Q1" in comp.columns:
+            cnv = ["Невзвешенная_Q1", "Невзвешенная_Q2", "Невзвешенная_Q3", "Невзвешенная_Q4"]
+            for c in cnv:
+                if c in comp.columns:
+                    comp[c] = pd.to_numeric(comp[c], errors="coerce").fillna(0)
+            comp["Сумма_сделки_prev"] = comp[[c for c in cnv if c in comp.columns]].sum(axis=1)
+        else:
+            comp["Сумма_сделки_prev"] = 0.0
 
-        if 'Название' in comparison_deals.columns and 'Название' in filtered_deals.columns:
-            comp_df = comparison_deals[['Название', 'Сумма_сделки', 'Вероятность']].copy()
-            comp_df = comp_df.rename(columns={
-                'Сумма_сделки': 'Сумма_сделки_prev',
-                'Вероятность': 'Вероятность_prev',
-            })
-            
-            filtered_deals = filtered_deals.merge(comp_df, on='Название', how='left')
-            
-            filtered_deals['Δ Сумма сделки'] = filtered_deals['Сумма_сделки'] - filtered_deals['Сумма_сделки_prev'].fillna(0)
-            
-            if is_fraction:
-                filtered_deals['Δ Вероятность'] = (filtered_deals['Вероятность'] - filtered_deals['Вероятность_prev'].fillna(0)) * 100
-            else:
-                filtered_deals['Δ Вероятность'] = filtered_deals['Вероятность'] - filtered_deals['Вероятность_prev'].fillna(0)
+        if "Взвешенная_Q1" in comp.columns:
+            cw = ["Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4"]
+            for c in cw:
+                if c in comp.columns:
+                    comp[c] = pd.to_numeric(comp[c], errors="coerce").fillna(0)
         else:
-            filtered_deals['Δ Сумма сделки'] = 0
-            filtered_deals['Δ Вероятность'] = 0
+            for c in ["Взвешенная_Q1", "Взвешенная_Q2", "Взвешенная_Q3", "Взвешенная_Q4"]:
+                comp[c] = 0.0
+
+        # Переименовываем кварталы предыдущего BR
+        for q in ["Q1", "Q2", "Q3", "Q4"]:
+            col = f"Взвешенная_{q}"
+            if col in comp.columns:
+                comp = comp.rename(columns={col: f"{col}_prev"})
+
+        if "Название" in comp.columns and "Название" in filtered.columns:
+            keep_cols = ["Название", "Сумма_сделки_prev"] + \
+                        [f"Взвешенная_{q}_prev" for q in ["Q1", "Q2", "Q3", "Q4"] if f"Взвешенная_{q}_prev" in comp.columns]
+            cmp_df = comp[keep_cols].copy()
+            filtered = filtered.merge(cmp_df, on="Название", how="left")
+        else:
+            filtered["Сумма_сделки_prev"] = 0.0
+            for q in ["Q1", "Q2", "Q3", "Q4"]:
+                filtered[f"Взвешенная_{q}_prev"] = 0.0
     else:
-        filtered_deals['Δ Сумма сделки'] = 0
-        filtered_deals['Δ Вероятность'] = 0
+        filtered["Сумма_сделки_prev"] = 0.0
+        for q in ["Q1", "Q2", "Q3", "Q4"]:
+            filtered[f"Взвешенная_{q}_prev"] = 0.0
+
+    # Считаем дельты
+    filtered["Δ Сумма сделки"] = filtered["Сумма_сделки"] - filtered["Сумма_сделки_prev"].fillna(0)
+    for q in ["Q1", "Q2", "Q3", "Q4"]:
+        col_cur = f"Взвешенная_{q}"
+        col_prev = f"Взвешенная_{q}_prev"
+        if col_cur in filtered.columns:
+            filtered[f"Δ {q}"] = filtered[col_cur] - filtered[col_prev].fillna(0)
 
     st.markdown("---")
     st.subheader("Реестр сделок")
 
     page_size = 12
-    total_rows = len(filtered_deals)
+    total_rows = len(filtered)
     total_pages = max(1, (total_rows + page_size - 1) // page_size)
 
     if "deals_page" not in st.session_state:
@@ -211,37 +222,38 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
             st.session_state["deals_page"] = page + 1
             st.rerun()
 
-    page_deals = filtered_deals.iloc[start_idx:end_idx].copy()
+    page_deals = filtered.iloc[start_idx:end_idx].copy()
 
     if len(page_deals) > 0:
         display = page_deals.copy()
-        
+
         if is_fraction:
             display["Вероятность"] = (display["Вероятность"] * 100).round(0)
         else:
             display["Вероятность"] = display["Вероятность"].round(0)
-            
         display["Вероятность"] = display["Вероятность"].fillna(0).astype(int)
-        
-        display["Δ Вероятность"] = display["Δ Вероятность"].fillna(0).round(0).astype(int)
-        display["Δ Вероятность"] = display["Δ Вероятность"].apply(lambda x: f"+{x}%" if x > 0 else f"{x}%" if x < 0 else "0%")
 
-        all_concept_cols = [
-            "Название", "SBU", "Клиент", 
-            "Тип_сделки", "Сумма_сделки", "Δ Сумма сделки", 
-            "Вероятность", "Δ Вероятность",
+        # Порядок колонок
+        cols = [
+            "Название", "Клиент", "Менеджер", "Тип_сделки",
+            "Невзвешенная_выручка", "Вероятность", "Взвешенная_выручка",
+            "Взвешенная_Q1", "Δ Q1",
+            "Взвешенная_Q2", "Δ Q2",
+            "Взвешенная_Q3", "Δ Q3",
+            "Взвешенная_Q4", "Δ Q4",
+            "Δ Сумма сделки",
         ]
+        cols_present = [c for c in cols if c in display.columns]
 
-        cols_present = [c for c in all_concept_cols if c in display.columns]
-
-        for col in ["Сумма_сделки", "Δ Сумма сделки"]:
-            if col in display.columns:
-                display[col] = display[col].apply(lambda v: fmt_num(v, 0))
+        numeric_cols = [c for c in display.columns if c.startswith("Взвешенная") or c.startswith("Δ") or c in ["Невзвешенная_выручка"]]
+        for c in numeric_cols:
+            if c in display.columns:
+                display[c] = pd.to_numeric(display[c], errors="coerce").fillna(0)
+                display[c] = display[c].apply(lambda v: fmt_num(v, 0))
 
         df_display = display[cols_present]
-        
         styler = df_display.style.apply(style_deals, axis=None).hide(axis="index")
-        
+
         st.dataframe(
             styler,
             width="stretch",
@@ -256,19 +268,14 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     st.markdown("---")
     st.subheader("Итого по выборке")
 
-    total_sum = filtered_deals["Сумма_сделки"].sum() if "Сумма_сделки" in filtered_deals.columns else 0
+    total_sum = filtered["Сумма_сделки"].sum() if "Сумма_сделки" in filtered.columns else 0
+    total_weighted = filtered["Взвешенная_выручка"].sum() if "Взвешенная_выручка" in filtered.columns else 0
+    avg_weighted_prob = (total_weighted / total_sum * 100) if total_sum > 0 else 0
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Всего сделок", len(filtered_deals))
-    c2.metric("Сумма сделок", f"{fmt_num(total_sum, 0)} тыс. руб.")
-    
-    if len(filtered_deals) > 0 and "Вероятность" in filtered_deals.columns:
-        avg_prob = filtered_deals['Вероятность'].mean()
-        if is_fraction:
-            avg_prob *= 100
-        c3.metric("Средняя вероятность", f"{avg_prob:.0f}%")
-    else:
-        c3.metric("Средняя вероятность", "—")
+    c1.metric("Сумма сделок", f"{fmt_num(total_sum, 0)} тыс. руб.")
+    c2.metric("Взвешенная выручка", f"{fmt_num(total_weighted, 0)} тыс. руб.")
+    c3.metric("Средневзвешенная вероятность", f"{avg_weighted_prob:.1f}%")
 
     st.markdown("---")
 
