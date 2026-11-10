@@ -430,21 +430,9 @@ for r in rows:
         "Δ Prev. BR": d_abs, "Δ Prev. BR, %": round(d_pct, 1),
     })
 
-total_pr = rev_total + direct_total + sga_total
-total_prev = (p_rev + p_direct + p_sga) if comparison else None
-total_budget = budget_rev + budget_direct + sga_total
-total_fact = rev_fact + direct_fact + sga_total
+# УБРАНА строка "ИТОГО (ключевые)"
+# table_data.append({...})
 
-table_data.append({
-    "Показатель": "ИТОГО (ключевые)", "Бюджет": total_budget, "Prev. BR": total_prev,
-    "Q1": total_pr/4, "Q2": total_pr/4, "Q3": total_pr/4, "Q4": total_pr/4,
-    "Факт YTD": total_fact,
-    "Прогноз": total_pr,
-    "Δ бюджет": (total_pr - total_budget) if total_budget else None,
-    "Δ бюджет, %": round(((total_pr - total_budget)/total_budget*100), 1) if total_budget else None,
-    "Δ Prev. BR": (total_pr - total_prev) if total_prev else None,
-    "Δ Prev. BR, %": round(((total_pr - total_prev)/total_prev*100), 1) if total_prev else None,
-})
 table = pd.DataFrame(table_data)
 
 display_table = table.copy()
@@ -453,7 +441,6 @@ def _fmt_cell(row, col):
     if pd.isna(v) or v is None:
         return "—"
     if row["Показатель"] == "GM%":
-        # Для GM% в колонках Q1-Q4 и Прогноз — без "+"
         if col in ["Q1", "Q2", "Q3", "Q4", "Прогноз"]:
             return fmt_pct(v, 1, with_sign=False)
         return fmt_pct(v, 1)
@@ -478,7 +465,7 @@ function(params) {
     if (neg) v = -v;
     var name = (params.data && params.data['Показатель']) ? String(params.data['Показатель']) : '';
     name = name.replace(/^\\s*—\\s*/,'').trim();
-    var isExpense = ['Прямые расходы','StaffCost','COGS','SGA','ИТОГО (ключевые)'].indexOf(name) !== -1;
+    var isExpense = ['Прямые расходы','StaffCost','COGS','SGA'].indexOf(name) !== -1;
     var good = isExpense ? (v < 0) : (v > 0);
     style.color = good ? '#1a7f37' : '#cf222e';
     style.fontWeight = '600';
