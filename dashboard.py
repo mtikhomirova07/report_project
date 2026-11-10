@@ -64,28 +64,26 @@ def fmt_pct(value, decimals=1, with_sign=True):
 def style_detail(df):
     css = pd.DataFrame('', index=df.index, columns=df.columns)
     
-    # Зебра
+    # Зебра для всех строк
     for i in range(1, len(df), 2):
         css.iloc[i, :] = 'background-color: #f8f9fa;'
+    
+    # Колонки, которые нужно красить (только дельты)
+    delta_cols = ["Δ бюджет", "Δ бюджет, %", "Δ Prev. BR", "Δ Prev. BR, %"]
     
     for idx, row in df.iterrows():
         name = str(row.get("Показатель", "")).replace("—", "").strip()
         is_expense = name in ["Прямые расходы", "StaffCost", "COGS", "SGA"]
         is_gm = name == "GM%"
         
-        for col in df.columns:
-            if col in ["Показатель"]:
+        for col in delta_cols:
+            if col not in df.columns:
                 continue
             
             val = row[col]
             if pd.isna(val) or str(val).strip() in ["—", ""]:
                 continue
             
-            # Для GM% — без цветового выделения (просто числа)
-            if is_gm:
-                continue
-            
-            # Парсим число
             s = str(val).replace(" ", "").replace("+", "").replace("%", "").replace("−", "-").replace(",", ".")
             try:
                 v = float(s)
@@ -95,7 +93,6 @@ def style_detail(df):
             if v == 0:
                 continue
             
-            # Определяем, "хорошо" или "плохо"
             if is_expense:
                 good = v < 0
             else:
