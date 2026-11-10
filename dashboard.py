@@ -60,6 +60,52 @@ def fmt_pct(value, decimals=1, with_sign=True):
         return f"−{formatted}%" if value < 0 else f"+{formatted}%" if value > 0 else f"{formatted}%"
     return f"−{formatted}%" if value < 0 else f"{formatted}%"
 
+# --- СТИЛЬ ДЛЯ ДЕТАЛИЗАЦИИ (цветовое выделение) ---
+def style_detail(df):
+    css = pd.DataFrame('', index=df.index, columns=df.columns)
+    
+    # Зебра
+    for i in range(1, len(df), 2):
+        css.iloc[i, :] = 'background-color: #f8f9fa;'
+    
+    for idx, row in df.iterrows():
+        name = str(row.get("Показатель", "")).replace("—", "").strip()
+        is_expense = name in ["Прямые расходы", "StaffCost", "COGS", "SGA"]
+        is_gm = name == "GM%"
+        
+        for col in df.columns:
+            if col in ["Показатель"]:
+                continue
+            
+            val = row[col]
+            if pd.isna(val) or str(val).strip() in ["—", ""]:
+                continue
+            
+            # Для GM% — без цветового выделения (просто числа)
+            if is_gm:
+                continue
+            
+            # Парсим число
+            s = str(val).replace(" ", "").replace("+", "").replace("%", "").replace("−", "-").replace(",", ".")
+            try:
+                v = float(s)
+            except:
+                continue
+            
+            if v == 0:
+                continue
+            
+            # Определяем, "хорошо" или "плохо"
+            if is_expense:
+                good = v < 0
+            else:
+                good = v > 0
+            
+            color = '#1a7f37' if good else '#cf222e'
+            css.loc[idx, col] = f'color: {color}; font-weight: 600;'
+    
+    return css
+
 # --- АВТОЗАГРУЗКА / ОБНОВЛЕНИЕ ---
 if not glob.glob(str(SNAPSHOTS_DIR / "**" / "*.xlsx"), recursive=True):
     with st.spinner("Первый запуск. Загружаю данные..."):
@@ -438,7 +484,6 @@ def _fmt_cell(row, col):
     if pd.isna(v) or v is None:
         return "—"
     if row["Показатель"] == "GM%":
-        # Для GM% — БЕЗ плюсов и минусов ВО ВСЕХ КОЛОНКАХ
         return fmt_pct(v, 1, with_sign=False)
     if col in ["Δ бюджет", "Δ Prev. BR"]:
         return fmt_num(v, 0, with_sign=False)
@@ -516,12 +561,9 @@ for q_label, months in months_by_quarter.items():
         for r in rows:
             name, q_val = r["Показатель"], r[q_label]
             mv = q_val / 3
-            # Для детализации: берем те же значения из table_data (с дельтами)
-            # Находим соответствующую строку в table_data по названию
             matched = next((t for t in table_data if t["Показатель"] == name), None)
             
             if name == "GM%":
-                # GM% — без плюсов и минусов
                 row_data = {
                     "Показатель": name,
                     months[0]: fmt_pct(q_val, 1, with_sign=False),
@@ -551,7 +593,8 @@ for q_label, months in months_by_quarter.items():
             mrows.append(row_data)
         
         df_q = pd.DataFrame(mrows)
-        styler = df_q.style.apply(zebra_style, axis=None).hide(axis="index")
+        # ПРИМЕНЯЕМ ЦВЕТОВОЕ ВЫДЕЛЕНИЕ (style_detail)
+        styler = df_q.style.apply(style_detail, axis=None).hide(axis="index")
         st.dataframe(styler, width="stretch", height=350)
 
 st.markdown("---")
