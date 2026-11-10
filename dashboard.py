@@ -52,11 +52,13 @@ def fmt_num(value, decimals=0, with_sign=False):
         return f"−{formatted}" if value < 0 else f"+{formatted}" if value > 0 else formatted
     return f"−{formatted}" if value < 0 else formatted
 
-def fmt_pct(value, decimals=1):
+def fmt_pct(value, decimals=1, with_sign=True):
     if pd.isna(value) or value is None:
         return "—"
     formatted = f"{abs(value):.{decimals}f}"
-    return f"−{formatted}%" if value < 0 else f"+{formatted}%" if value > 0 else f"{formatted}%"
+    if with_sign:
+        return f"−{formatted}%" if value < 0 else f"+{formatted}%" if value > 0 else f"{formatted}%"
+    return f"−{formatted}%" if value < 0 else f"{formatted}%"
 
 # --- АВТОЗАГРУЗКА / ОБНОВЛЕНИЕ ---
 if not glob.glob(str(SNAPSHOTS_DIR / "**" / "*.xlsx"), recursive=True):
@@ -91,7 +93,7 @@ for f in snapshot_files:
     snapshot_groups.setdefault(key, []).append(f)
 group_keys = sorted(snapshot_groups.keys(), reverse=True)
 
-# --- ЧТЕНИЕ EXCEL С ФАКТОМ ---
+# --- ЧТЕНИЕ EXCEL ---
 def read_excel_with_header(path, sheet_name):
     try:
         df = pd.read_excel(path, sheet_name=sheet_name, header=None, engine="calamine")
@@ -337,7 +339,7 @@ rev_gap = get_rev(types["GAP"])
 
 # ФАКТ
 rev_fact = get_fact(rev)
-cogs_fact = get_fact(rev)  # Пока используем тот же факт для COGS (или можно разделить)
+cogs_fact = get_fact(rev)
 staff_fact = get_fact(stf) if not stf.empty else 0.0
 direct_fact = staff_fact + cogs_fact
 gp3_fact = rev_fact - direct_fact
@@ -451,6 +453,9 @@ def _fmt_cell(row, col):
     if pd.isna(v) or v is None:
         return "—"
     if row["Показатель"] == "GM%":
+        # Для GM% в колонках Q1-Q4 и Прогноз — без "+"
+        if col in ["Q1", "Q2", "Q3", "Q4", "Прогноз"]:
+            return fmt_pct(v, 1, with_sign=False)
         return fmt_pct(v, 1)
     if col in ["Δ бюджет", "Δ Prev. BR"]:
         return fmt_num(v, 0, with_sign=False)
