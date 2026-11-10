@@ -129,8 +129,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     prob_col = filtered["Вероятность"] * 100 if is_fraction else filtered["Вероятность"]
     if sel_prob != "Все":
         filtered = filtered[prob_col.round(0) == sel_prob]
-    else:
-        filtered = filtered[prob_col.round(0) > 0]
+    # УБРАЛИ ФИЛЬТР > 0 — теперь показываются все сделки (даже с вероятностью 0%)
 
     if comparison_deals is not None and not comparison_deals.empty:
         comp = comparison_deals.copy()
@@ -253,7 +252,6 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     else:
         st.info("Нет сделок с выбранными фильтрами")
 
-    # ВОЗВРАЩАЕМ блок "Итого по выборке"
     st.markdown("---")
     st.subheader("Итого по выборке")
 
