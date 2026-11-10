@@ -102,7 +102,6 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         st.selectbox("Менеджер", managers, key="deals_manager")
 
     with col2:
-        # ДОБАВЛЕН "Extra GAP" в фильтр
         valid_types = ["Backlog", "Pipeline", "GAP", "Extra Gap", "Extra GAP"]
         deals["Тип_сделки"] = deals["Тип_сделки"].astype(str).str.strip().str.title()
         found_types = [t for t in valid_types if t in deals["Тип_сделки"].unique()]
@@ -253,6 +252,19 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         )
     else:
         st.info("Нет сделок с выбранными фильтрами")
+
+    # ВОЗВРАЩАЕМ блок "Итого по выборке"
+    st.markdown("---")
+    st.subheader("Итого по выборке")
+
+    total_sum = filtered["Сумма_сделки"].sum() if "Сумма_сделки" in filtered.columns else 0
+    total_weighted = filtered["Взвешенная_выручка"].sum() if "Взвешенная_выручка" in filtered.columns else 0
+    avg_weighted_prob = (total_weighted / total_sum * 100) if total_sum > 0 else 0
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Сумма сделок", f"{fmt_num(total_sum, 0)} тыс. руб.")
+    c2.metric("Взвешенная выручка", f"{fmt_num(total_weighted, 0)} тыс. руб.")
+    c3.metric("Средневзвешенная вероятность", f"{avg_weighted_prob:.1f}%")
 
     st.markdown("---")
 

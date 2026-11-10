@@ -430,9 +430,6 @@ for r in rows:
         "Δ Prev. BR": d_abs, "Δ Prev. BR, %": round(d_pct, 1),
     })
 
-# УБРАНА строка "ИТОГО (ключевые)"
-# table_data.append({...})
-
 table = pd.DataFrame(table_data)
 
 display_table = table.copy()
@@ -441,9 +438,8 @@ def _fmt_cell(row, col):
     if pd.isna(v) or v is None:
         return "—"
     if row["Показатель"] == "GM%":
-        if col in ["Q1", "Q2", "Q3", "Q4", "Прогноз"]:
-            return fmt_pct(v, 1, with_sign=False)
-        return fmt_pct(v, 1)
+        # Для GM% — БЕЗ плюсов и минусов ВО ВСЕХ КОЛОНКАХ
+        return fmt_pct(v, 1, with_sign=False)
     if col in ["Δ бюджет", "Δ Prev. BR"]:
         return fmt_num(v, 0, with_sign=False)
     return fmt_num(v, 0)
@@ -452,7 +448,9 @@ for col in ["Бюджет","Prev. BR","Q1","Q2","Q3","Q4","Факт YTD","Про
     display_table[col] = display_table.apply(lambda r, c=col: _fmt_cell(r, c), axis=1)
 for col in ["Δ бюджет, %","Δ Prev. BR, %"]:
     display_table[col] = display_table.apply(
-        lambda r: "—" if pd.isna(r[col]) or r[col] is None else fmt_pct(r[col], 1), axis=1)
+        lambda r: "—" if pd.isna(r[col]) or r[col] is None else (
+            fmt_pct(r[col], 1, with_sign=False) if r["Показатель"] == "GM%" else fmt_pct(r[col], 1)
+        ), axis=1)
 
 _STYLE_JS = JsCode("""
 function(params) {
@@ -518,16 +516,43 @@ for q_label, months in months_by_quarter.items():
         for r in rows:
             name, q_val = r["Показатель"], r[q_label]
             mv = q_val / 3
+            # Для детализации: берем те же значения из table_data (с дельтами)
+            # Находим соответствующую строку в table_data по названию
+            matched = next((t for t in table_data if t["Показатель"] == name), None)
+            
             if name == "GM%":
-                mrows.append({"Показатель": name,
-                              months[0]: fmt_pct(q_val,1), months[1]: fmt_pct(q_val,1),
-                              months[2]: fmt_pct(q_val,1), f"Итого {q_label}": fmt_pct(q_val,1)})
+                # GM% — без плюсов и минусов
+                row_data = {
+                    "Показатель": name,
+                    months[0]: fmt_pct(q_val, 1, with_sign=False),
+                    months[1]: fmt_pct(q_val, 1, with_sign=False),
+                    months[2]: fmt_pct(q_val, 1, with_sign=False),
+                    f"Итого {q_label}": fmt_pct(q_val, 1, with_sign=False),
+                }
+                if matched:
+                    row_data["Δ бюджет"] = fmt_num(matched.get("Δ бюджет", 0), 0, with_sign=False) if matched.get("Δ бюджет") is not None else "—"
+                    row_data["Δ бюджет, %"] = fmt_pct(matched.get("Δ бюджет, %", 0), 1, with_sign=False) if matched.get("Δ бюджет, %") is not None else "—"
+                    row_data["Δ Prev. BR"] = fmt_num(matched.get("Δ Prev. BR", 0), 0, with_sign=False) if matched.get("Δ Prev. BR") is not None else "—"
+                    row_data["Δ Prev. BR, %"] = fmt_pct(matched.get("Δ Prev. BR, %", 0), 1, with_sign=False) if matched.get("Δ Prev. BR, %") is not None else "—"
             else:
-                mrows.append({"Показатель": name,
-                              months[0]: fmt_num(mv,0), months[1]: fmt_num(mv,0),
-                              months[2]: fmt_num(mv,0), f"Итого {q_label}": fmt_num(q_val,0)})
-        st.dataframe(pd.DataFrame(mrows).style.apply(zebra_style, axis=None).hide(axis="index"),
-                     width="stretch", height=350)
+                row_data = {
+                    "Показатель": name,
+                    months[0]: fmt_num(mv, 0),
+                    months[1]: fmt_num(mv, 0),
+                    months[2]: fmt_num(mv, 0),
+                    f"Итого {q_label}": fmt_num(q_val, 0),
+                }
+                if matched:
+                    row_data["Δ бюджет"] = fmt_num(matched.get("Δ бюджет", 0), 0, with_sign=False) if matched.get("Δ бюджет") is not None else "—"
+                    row_data["Δ бюджет, %"] = fmt_pct(matched.get("Δ бюджет, %", 0), 1) if matched.get("Δ бюджет, %") is not None else "—"
+                    row_data["Δ Prev. BR"] = fmt_num(matched.get("Δ Prev. BR", 0), 0, with_sign=False) if matched.get("Δ Prev. BR") is not None else "—"
+                    row_data["Δ Prev. BR, %"] = fmt_pct(matched.get("Δ Prev. BR, %", 0), 1) if matched.get("Δ Prev. BR, %") is not None else "—"
+            
+            mrows.append(row_data)
+        
+        df_q = pd.DataFrame(mrows)
+        styler = df_q.style.apply(zebra_style, axis=None).hide(axis="index")
+        st.dataframe(styler, width="stretch", height=350)
 
 st.markdown("---")
 st.subheader("Динамика по неделям")
