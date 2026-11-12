@@ -195,10 +195,15 @@ def load_all_snapshots(paths):
             fact_df["crm_id"] = fact_df["crm_id"].astype(str).str.strip()
             if "Ссылка" in rev.columns:
                 rev["crm_id"] = rev["Ссылка"].astype(str).str.extract(r"edit/([a-f0-9-]+)")[0]
+                
+                # Удаляем старые колонки "Факт_*" (если есть), чтобы не было конфликта
+                rev = rev.drop(columns=["Факт_Q1", "Факт_Q2"], errors="ignore")
+                
                 rev = rev.merge(
                     fact_df[["crm_id", "q1", "q2"]].rename(columns={"q1": "Факт_Q1", "q2": "Факт_Q2"}),
                     on="crm_id",
-                    how="left"
+                    how="left",
+                    suffixes=("", "_fact")
                 )
                 rev["Факт_Q1"] = rev["Факт_Q1"].fillna(0)
                 rev["Факт_Q2"] = rev["Факт_Q2"].fillna(0)
