@@ -5,7 +5,6 @@ import glob
 import time
 import os
 import zipfile
-import shutil
 import re
 from datetime import datetime
 from pathlib import Path
@@ -44,24 +43,26 @@ def download_file_with_retry(url, headers, max_retries=3):
 
 
 def clean_excel_styles(filepath):
-    """Удаляет styles.xml и ссылки на стили из xlsx (чтобы calamine/openpyxl не падали)."""
-    temp_path = filepath + ".tmp"
+    """Удаляет styles.xml и ссылки на стили из xlsx."""
+    temp_path = str(filepath) + ".tmp"
     try:
-        with zipfile.ZipFile(filepath, 'r') as zin, zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as zout:
-            for item in zin.infolist():
-                data = zin.read(item.filename)
-                if item.filename == 'xl/styles.xml':
-                    continue
-                if item.filename.endswith('.xml') and item.filename.startswith('xl/'):
-                    try:
-                        text = data.decode('utf-8')
-                        text = re.sub(r'\ss="\d+"', '', text)
-                        text = re.sub(r'<cellStyles[^>]*>.*?</cellStyles>', '', text, flags=re.DOTALL)
-                        data = text.encode('utf-8')
-                    except Exception:
-                        pass
-                zout.writestr(item, data)
-        shutil.move(temp_path, filepath)
+        with zipfile.ZipFile(filepath, 'r') as zin:
+            with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as zout:
+                for item in zin.infolist():
+                    data = zin.read(item.filename)
+                    if item.filename == 'xl/styles.xml':
+                        continue
+                    if item.filename.endswith('.xml') and item.filename.startswith('xl/'):
+                        try:
+                            text = data.decode('utf-8')
+                            text = re.sub(r'\ss="\d+"', '', text)
+                            text = re.sub(r'<cellStyles[^>]*>.*?</cellStyles>', '', text, flags=re.DOTALL)
+                            text = re.sub(r'<cellXfs[^>]*>.*?</cellXfs>', '', text, flags=re.DOTALL)
+                            data = text.encode('utf-8')
+                        except Exception:
+                            pass
+                    zout.writestr(item, data)
+        os.replace(temp_path, filepath)
         return True
     except Exception as e:
         if os.path.exists(temp_path):
@@ -73,7 +74,7 @@ def get_all_excel_files():
     url = "https://cloud-api.yandex.net/v1/disk/resources"
     headers = {"Authorization": f"OAuth {YANDEX_TOKEN}"}
     params = {"path": FOLDER_PATH, "limit": 1000}
-    
+
     response = None
     for attempt in range(3):
         try:
@@ -82,65 +83,65 @@ def get_all_excel_files():
                 break
         except Exception:
             time.sleep(2)
-    
+
     if not response or response.status_code != 200:
         raise Exception(f"Ошибка доступа к Яндекс.Диску: {response.text if response else 'Нет ответа'}")
-    
+
     items = response.json().get("_embedded", {}).get("items", [])
     folders = [i for i in items if i["type"] == "dir"]
-    
+
     downloaded = []
     now_str = datetime.now().strftime("%Y-%m-%d_%H%M")
-    
+
     if folders:
         for folder in folders:
             folder_name = folder["name"]
             folder_url = "https://cloud-api.yandex.net/v1/disk/resources"
             folder_params = {"path": folder["path"], "limit": 100}
-            
+
             folder_response = requests.get(folder_url, headers=headers, params=folder_params, timeout=30)
             if folder_response.status_code != 200:
                 continue
-            
+
             folder_items = folder_response.json().get("_embedded", {}).get("items", [])
             folder_files = [i for i in folder_items if i["name"].endswith(".xlsx") and i["type"] == "file"]
-            
+
             for f in folder_files:
                 download_url = f["file"]
                 content = download_file_with_retry(download_url, headers)
-                
+
                 if content:
                     base_name = Path(f["name"]).stem
                     new_path = SNAPSHOTS_DIR / f"{now_str}_{folder_name}_{base_name}.xlsx"
-                    
+
                     with open(new_path, "wb") as file:
                         file.write(content)
-                    
+
                     clean_excel_styles(new_path)
                     downloaded.append(f"{folder_name}/{f['name']}")
-                
+
                 time.sleep(1)
     else:
         files = [i for i in items if i["name"].endswith(".xlsx") and i["type"] == "file"]
         for f in files:
             download_url = f["file"]
             content = download_file_with_retry(download_url, headers)
-            
+
             if content:
                 base_name = Path(f["name"]).stem
                 new_path = SNAPSHOTS_DIR / f"{now_str}_{base_name}.xlsx"
-                
+
                 with open(new_path, "wb") as file:
                     file.write(content)
-                
+
                 clean_excel_styles(new_path)
                 downloaded.append(f["name"])
-            
+
             time.sleep(1)
-    
+
     if not downloaded:
         raise Exception("Не удалось скачать ни одного файла")
-    
+
     return downloaded
 
 
