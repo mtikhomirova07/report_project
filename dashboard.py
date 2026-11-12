@@ -38,7 +38,18 @@ st.markdown("""
     [data-testid="stSidebarUserContent"] { padding-top: 2rem !important; }
     [data-testid="stSidebar"] h2 { padding-bottom: 0rem !important; margin-bottom: 0.5rem !important; }
     [data-testid="stSidebar"] hr { margin: 10px 0 !important; }
-    [data-testid="stSidebar"] .stRadio { margin-bottom: -10px !important; }
+    
+    /* Убираем обрезание выпадающего списка */
+    [data-testid="stSidebar"] [data-baseweb="select"] > div {
+        background-color: #ffffff !important;
+    }
+    [data-baseweb="popover"] {
+        z-index: 9999 !important;
+    }
+    
+    /* Выравниваем отступы для радио-кнопок навигации */
+    [data-testid="stSidebar"] .stRadio { margin-bottom: 0px !important; }
+    [data-testid="stSidebar"] .stRadio > div { gap: 0.2rem !important; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -546,7 +557,8 @@ for sbu in sorted(sbus):
     if sbu.strip() != "":
         by_list.append(sbu)
 
-selected_by = st.sidebar.selectbox("Бизнес-юнит (БЮ)", by_list)
+# Заменили selectbox на radio
+selected_by = st.sidebar.radio("Бизнес-юнит (БЮ)", by_list)
 
 rev = filter_by_sbu(rev_all, selected_by)
 stf = filter_by_sbu(stf_all, selected_by)
@@ -591,9 +603,10 @@ rev_backlog = get_rev(types["Backlog"])
 rev_pipeline = get_rev(types["Pipeline"])
 rev_gap = get_rev(types["GAP"])
 
-# ФАКТ
+# ФАКТ (исправлено)
 rev_fact = get_fact(rev)
-cogs_fact = get_fact(rev)
+# Факт COGS берем из файлов (он там есть), либо 0, если нет
+cogs_fact = sum(pd.to_numeric(rev.get(f"COGS_{q}", 0), errors="coerce").fillna(0).sum() for q in ["Q1", "Q2"]) if not rev.empty else 0.0
 staff_fact = get_fact(stf) if not stf.empty else 0.0
 direct_fact = staff_fact + cogs_fact
 gp3_fact = rev_fact - direct_fact
