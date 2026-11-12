@@ -386,8 +386,10 @@ def load_all_snapshots(paths):
                 rev = rev.drop(columns=["crm_id"])
         except Exception as e:
             errors.append(f"Ошибка мержа факта: {e}")
-
+            
+    st.write("DEBUG: Сумма факта в rev =", rev["Факт_Q1"].sum() + rev["Факт_Q2"].sum())
     return rev, stf, errors
+    
 
 # --- ФУНКЦИИ РАСЧЕТА ---
 def get_rev(df, quarters=("Q1","Q2","Q3","Q4")):
