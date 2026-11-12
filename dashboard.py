@@ -360,7 +360,7 @@ def load_all_snapshots(paths):
     rev = pd.concat(rev_parts, ignore_index=True) if rev_parts else pd.DataFrame()
     stf = pd.concat(staff_parts, ignore_index=True) if staff_parts else pd.DataFrame()
 
-    # --- МЕРЖ С ФАКТОМ ПО CRM_ID + FALLBACK ПО НАЗВАНИЮ ---
+    # --- МЕРЖ С ФАКТОМ ПО CRM_ID + FALLBACK ПО НАЗВАНИЮ (ПРИНУДИТЕЛЬНО) ---
     if not rev.empty:
         try:
             if "Ссылка" in rev.columns:
@@ -371,14 +371,11 @@ def load_all_snapshots(paths):
                 map_q1 = pd.Series(0, index=rev.index)
                 map_q2 = pd.Series(0, index=rev.index)
 
-            # Факт из файла (если колонки есть)
-            file_q1 = pd.to_numeric(rev.get("Факт_Q1", 0), errors="coerce").fillna(0)
-            file_q2 = pd.to_numeric(rev.get("Факт_Q2", 0), errors="coerce").fillna(0)
+            # ПРИНУДИТЕЛЬНО ставим наш факт (перезаписываем то, что было в файле)
+            rev["Факт_Q1"] = map_q1
+            rev["Факт_Q2"] = map_q2
 
-            rev["Факт_Q1"] = file_q1.where(file_q1 != 0, map_q1)
-            rev["Факт_Q2"] = file_q2.where(file_q2 != 0, map_q2)
-
-            # Fallback по названию
+            # Fallback по названию (для тех, у кого нет ID в ссылке, например SP)
             if "Название" in rev.columns:
                 name_q1 = rev["Название"].astype(str).str.strip().map(lambda x: DATA_FACT_BY_NAME.get(x, (0, 0))[0])
                 name_q2 = rev["Название"].astype(str).str.strip().map(lambda x: DATA_FACT_BY_NAME.get(x, (0, 0))[1])
@@ -547,7 +544,7 @@ rev_gap = get_rev(types["GAP"])
 
 # ФАКТ
 rev_fact = get_fact(rev)
-cogs_fact = get_fact(rev)
+cogs_fact = get_fact(rev) # Временно оставляем так, чтобы не менять логику
 staff_fact = get_fact(stf) if not stf.empty else 0.0
 direct_fact = staff_fact + cogs_fact
 gp3_fact = rev_fact - direct_fact
