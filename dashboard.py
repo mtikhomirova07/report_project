@@ -193,9 +193,9 @@ def load_all_snapshots(paths):
     if FACT_PATH.exists() and not rev.empty:
         try:
             fact_df = pd.read_csv(FACT_PATH)
-            fact_df["crm_id"] = fact_df["crm_id"].astype(str).str.strip()
+            fact_df["crm_id"] = fact_df["crm_id"].astype(str).str.strip().str.lower()
             if "Ссылка" in rev.columns:
-                rev["crm_id"] = rev["Ссылка"].astype(str).str.extract(r"edit/([a-f0-9-]+)")[0]
+                rev["crm_id"] = rev["Ссылка"].astype(str).str.extract(r"edit/([a-f0-9-]+)")[0].str.strip().str.lower()
                 
                 # Удаляем старые колонки "Факт_*" (если есть), чтобы не было конфликта
                 rev = rev.drop(columns=["Факт_Q1", "Факт_Q2"], errors="ignore")
