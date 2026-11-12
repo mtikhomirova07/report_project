@@ -14,9 +14,11 @@ from approvals import (
 )
 from auth import check_password
 
-st.set_page_config(page_title="Управленческая отчётность", layout="wide")
 if not check_password():
     st.stop()
+
+# Принудительная очистка кэша при каждом запуске
+st.cache_data.clear()
 
 def zebra_style(x):
     css = pd.DataFrame('', index=x.index, columns=x.columns)
