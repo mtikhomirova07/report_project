@@ -1,0 +1,37 @@
+name: Update data from Yandex.Disk
+
+on:
+  schedule:
+    # Каждый понедельник в 06:00 UTC (09:00 МСК)
+    - cron: '0 6 * * 1'
+  workflow_dispatch:  # Можно запустить вручную через вкладку "Actions"
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas openpyxl requests
+
+      - name: Download data from Yandex.Disk
+        env:
+          YANDEX_TOKEN: ${{ secrets.YANDEX_TOKEN }}
+        run: |
+          python loader.py
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add data/snapshots/
+          git diff --staged --quiet || git commit -m "Auto-update data $(date +'%Y-%m-%d')"
+          git push
