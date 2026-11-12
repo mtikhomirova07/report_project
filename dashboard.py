@@ -47,6 +47,8 @@ def parse_timestamp(ts):
 def fmt_num(value, decimals=0, with_sign=False):
     if pd.isna(value) or value is None:
         return "—"
+    if abs(value) < 0.5:
+        return "0"
     formatted = f"{abs(value):,.{decimals}f}".replace(",", " ")
     if with_sign:
         return f"−{formatted}" if value < 0 else f"+{formatted}" if value > 0 else formatted
@@ -55,53 +57,12 @@ def fmt_num(value, decimals=0, with_sign=False):
 def fmt_pct(value, decimals=1, with_sign=True):
     if pd.isna(value) or value is None:
         return "—"
+    if abs(value) < 0.05:
+        return f"{abs(value):.{decimals}f}%"
     formatted = f"{abs(value):.{decimals}f}"
     if with_sign:
         return f"−{formatted}%" if value < 0 else f"+{formatted}%" if value > 0 else f"{formatted}%"
     return f"−{formatted}%" if value < 0 else f"{formatted}%"
-
-# --- СТИЛЬ ДЛЯ ДЕТАЛИЗАЦИИ (цветовое выделение) ---
-def style_detail(df):
-    css = pd.DataFrame('', index=df.index, columns=df.columns)
-    
-    # Зебра для всех строк
-    for i in range(1, len(df), 2):
-        css.iloc[i, :] = 'background-color: #f8f9fa;'
-    
-    # Колонки, которые нужно красить (только дельты)
-    delta_cols = ["Δ бюджет", "Δ бюджет, %", "Δ Prev. BR", "Δ Prev. BR, %"]
-    
-    for idx, row in df.iterrows():
-        name = str(row.get("Показатель", "")).replace("—", "").strip()
-        is_expense = name in ["Прямые расходы", "StaffCost", "COGS", "SGA"]
-        is_gm = name == "GM%"
-        
-        for col in delta_cols:
-            if col not in df.columns:
-                continue
-            
-            val = row[col]
-            if pd.isna(val) or str(val).strip() in ["—", ""]:
-                continue
-            
-            s = str(val).replace(" ", "").replace("+", "").replace("%", "").replace("−", "-").replace(",", ".")
-            try:
-                v = float(s)
-            except:
-                continue
-            
-            if v == 0:
-                continue
-            
-            if is_expense:
-                good = v < 0
-            else:
-                good = v > 0
-            
-            color = '#1a7f37' if good else '#cf222e'
-            css.loc[idx, col] = f'color: {color}; font-weight: 600;'
-    
-    return css
 
 # --- АВТОЗАГРУЗКА / ОБНОВЛЕНИЕ ---
 if not glob.glob(str(SNAPSHOTS_DIR / "**" / "*.xlsx"), recursive=True):
@@ -590,7 +551,40 @@ for q_label, months in months_by_quarter.items():
             mrows.append(row_data)
         
         df_q = pd.DataFrame(mrows)
-        # ПРИМЕНЯЕМ ЦВЕТОВОЕ ВЫДЕЛЕНИЕ (style_detail)
+        
+        # Цветовое выделение ТОЛЬКО в колонках с дельтами
+        def style_detail(df):
+            css = pd.DataFrame('', index=df.index, columns=df.columns)
+            for i in range(1, len(df), 2):
+                css.iloc[i, :] = 'background-color: #f8f9fa;'
+            
+            delta_cols = ["Δ бюджет", "Δ бюджет, %", "Δ Prev. BR", "Δ Prev. BR, %"]
+            for idx, row in df.iterrows():
+                name = str(row.get("Показатель", "")).replace("—", "").strip()
+                is_expense = name in ["Прямые расходы", "StaffCost", "COGS", "SGA"]
+                is_gm = name == "GM%"
+                
+                for col in delta_cols:
+                    if col not in df.columns:
+                        continue
+                    val = row[col]
+                    if pd.isna(val) or str(val).strip() in ["—", ""]:
+                        continue
+                    s = str(val).replace(" ", "").replace("+", "").replace("%", "").replace("−", "-").replace(",", ".")
+                    try:
+                        v = float(s)
+                    except:
+                        continue
+                    if v == 0:
+                        continue
+                    if is_expense:
+                        good = v < 0
+                    else:
+                        good = v > 0
+                    color = '#1a7f37' if good else '#cf222e'
+                    css.loc[idx, col] = f'color: {color}; font-weight: 600;'
+            return css
+        
         styler = df_q.style.apply(style_detail, axis=None).hide(axis="index")
         st.dataframe(styler, width="stretch", height=350)
 
