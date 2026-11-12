@@ -1,9 +1,9 @@
-import streamlit as st
 import pandas as pd
 import io
 import requests
 import glob
 import time
+import os
 from datetime import datetime
 from pathlib import Path
 
@@ -14,9 +14,20 @@ LOGS_DIR = BASE_DIR / "data" / "logs"
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-YANDEX_TOKEN = "y0__wgBENmAzqeq94ACGKe9TiD99KHQGUiTOezfAC1bXzcTrARWQ753zG3n"
+# --- Токен из переменной окружения (GitHub Actions) или Streamlit Secrets (локально) ---
+def get_yandex_token():
+    token = os.getenv("YANDEX_TOKEN")
+    if token:
+        return token
+    try:
+        import streamlit as st
+        return st.secrets["yandex"]["token"]
+    except Exception:
+        raise Exception("YANDEX_TOKEN не задан. Добавьте его в GitHub Secrets или Streamlit Secrets.")
 
+YANDEX_TOKEN = get_yandex_token()
 FOLDER_PATH = "/reports"
+
 
 def download_file_with_retry(url, headers, max_retries=3):
     """Скачивает файл с повторными попытками."""
@@ -30,6 +41,7 @@ def download_file_with_retry(url, headers, max_retries=3):
             time.sleep(2)
     return None
 
+
 def get_all_excel_files():
     """Скачивает все Excel-файлы из папок на Яндекс.Диске."""
     url = "https://cloud-api.yandex.net/v1/disk/resources"
@@ -37,7 +49,6 @@ def get_all_excel_files():
     
     params = {"path": FOLDER_PATH, "limit": 1000}
     
-    # Получаем список папок (с повторными попытками)
     response = None
     for attempt in range(3):
         try:
@@ -82,7 +93,6 @@ def get_all_excel_files():
                     
                     downloaded.append(f"{folder_name}/{f['name']}")
                 
-                # Пауза между файлами, чтобы Яндекс не блокировал
                 time.sleep(1)
     else:
         files = [i for i in items if i["name"].endswith(".xlsx") and i["type"] == "file"]
@@ -106,6 +116,7 @@ def get_all_excel_files():
     
     return downloaded
 
+
 def update_data():
     try:
         files = get_all_excel_files()
@@ -119,6 +130,7 @@ def update_data():
         error_file = LOGS_DIR / "LAST_ERROR.txt"
         error_file.write_text(str(e), encoding="utf-8")
         return False, str(e)
+
 
 if __name__ == "__main__":
     success, message = update_data()
