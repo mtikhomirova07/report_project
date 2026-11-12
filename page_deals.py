@@ -30,6 +30,18 @@ def style_deals(df):
     return css
 
 def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_num, fmt_pct):
+    # CSS-хак: скрываем поле ввода в выпадающих списках
+    st.markdown("""
+        <style>
+            div[data-baseweb="select"] input {
+                display: none !important;
+            }
+            div[data-baseweb="select"] > div {
+                cursor: pointer !important;
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
     st.title("Сделки")
     st.caption("Фильтры по менеджеру, типу сделки и вероятности.")
 
