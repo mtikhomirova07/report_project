@@ -102,10 +102,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
         st.selectbox("Менеджер", managers, key="deals_manager")
 
     with col2:
-        valid_types = ["Backlog", "Pipeline", "GAP", "Extra Gap", "Extra GAP"]
-        deals["Тип_сделки"] = deals["Тип_сделки"].astype(str).str.strip().str.title()
-        found_types = [t for t in valid_types if t in deals["Тип_сделки"].unique()]
-        types = ["Все"] + found_types
+        types = ["Все", "Backlog", "Pipeline", "Extra GAP"]
         st.selectbox("Тип сделки", types, key="deals_type")
 
     with col3:
@@ -119,17 +116,21 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     sel_prob = st.session_state.get("deals_prob_single", "Все")
 
     filtered = deals.copy()
+    
+    # Убираем строки-заглушки
+    filtered = filtered[filtered["Название"].astype(str).str.strip() != "Название"]
+    filtered = filtered[filtered["Клиент"].astype(str).str.strip() != "Заказчик"]
+    filtered = filtered[filtered["Тип_сделки"].astype(str).str.strip() != "Backlog_Pipeline"]
 
     if sel_manager != "Все":
         filtered = filtered[filtered["Менеджер"].astype(str) == sel_manager]
 
     if sel_type != "Все":
-        filtered = filtered[filtered["Тип_сделки"] == sel_type]
+        filtered = filtered[filtered["Тип_сделки"].astype(str).str.strip().str.title() == sel_type]
 
     prob_col = filtered["Вероятность"] * 100 if is_fraction else filtered["Вероятность"]
     if sel_prob != "Все":
         filtered = filtered[prob_col.round(0) == sel_prob]
-    # УБРАЛИ ФИЛЬТР > 0 — теперь показываются все сделки (даже с вероятностью 0%)
 
     if comparison_deals is not None and not comparison_deals.empty:
         comp = comparison_deals.copy()
