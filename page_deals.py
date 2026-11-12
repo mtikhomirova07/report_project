@@ -99,15 +99,15 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
 
     with col1:
         managers = ["Все"] + sorted(deals["Менеджер"].dropna().astype(str).unique().tolist())
-        st.radio("Менеджер", managers, key="deals_manager", horizontal=False)
+        st.selectbox("Менеджер", managers, key="deals_manager")
 
     with col2:
         types = ["Все", "Backlog", "Pipeline", "Extra GAP"]
-        st.radio("Тип сделки", types, key="deals_type", horizontal=False)
+        st.selectbox("Тип сделки", types, key="deals_type")
 
     with col3:
         prob_options = ["Все", 1, 25, 40, 60, 80, 100]
-        st.radio("Вероятность сделки", prob_options, key="deals_prob_single", horizontal=False)
+        st.selectbox("Вероятность сделки", prob_options, key="deals_prob_single")
 
     st.button("Сбросить фильтры", on_click=reset_filters)
 
