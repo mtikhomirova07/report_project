@@ -2,9 +2,11 @@ name: Update data from Yandex.Disk
 
 on:
   schedule:
-    # Каждый понедельник в 06:00 UTC (09:00 МСК)
     - cron: '0 6 * * 1'
-  workflow_dispatch:  # Можно запустить вручную через вкладку "Actions"
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   update:
