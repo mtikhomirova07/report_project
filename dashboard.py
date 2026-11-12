@@ -39,7 +39,7 @@ st.markdown("""
     [data-testid="stSidebar"] h2 { padding-bottom: 0rem !important; margin-bottom: 0.5rem !important; }
     [data-testid="stSidebar"] hr { margin: 10px 0 !important; }
     
-    /* Убираем обрезание выпадающего списка */
+    /* Фиксы для выпадающих списков */
     [data-testid="stSidebar"] [data-baseweb="select"] > div {
         background-color: #ffffff !important;
     }
@@ -557,8 +557,9 @@ for sbu in sorted(sbus):
     if sbu.strip() != "":
         by_list.append(sbu)
 
-# Вернули стандартный selectbox, как было изначально
-selected_by = st.sidebar.selectbox("Бизнес-юнит (БЮ)", by_list)
+# Используем multiselect, чтобы список открывался строго вниз
+selected_list = st.sidebar.multiselect("Бизнес-юнит (БЮ)", by_list, default=["Все"], max_selections=1)
+selected_by = selected_list[0] if selected_list else "Все"
 
 rev = filter_by_sbu(rev_all, selected_by)
 stf = filter_by_sbu(stf_all, selected_by)
