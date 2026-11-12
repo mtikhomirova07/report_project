@@ -4,6 +4,9 @@ import requests
 import glob
 import time
 import os
+import zipfile
+import shutil
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -14,7 +17,6 @@ LOGS_DIR = BASE_DIR / "data" / "logs"
 SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
-# --- Токен из переменной окружения (GitHub Actions) или Streamlit Secrets (локально) ---
 def get_yandex_token():
     token = os.getenv("YANDEX_TOKEN")
     if token:
@@ -30,7 +32,6 @@ FOLDER_PATH = "/reports"
 
 
 def download_file_with_retry(url, headers, max_retries=3):
-    """Скачивает файл с повторными попытками."""
     for attempt in range(max_retries):
         try:
             response = requests.get(url, headers=headers, timeout=60)
@@ -42,11 +43,35 @@ def download_file_with_retry(url, headers, max_retries=3):
     return None
 
 
+def clean_excel_styles(filepath):
+    """Удаляет styles.xml и ссылки на стили из xlsx (чтобы calamine/openpyxl не падали)."""
+    temp_path = filepath + ".tmp"
+    try:
+        with zipfile.ZipFile(filepath, 'r') as zin, zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as zout:
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+                if item.filename == 'xl/styles.xml':
+                    continue
+                if item.filename.endswith('.xml') and item.filename.startswith('xl/'):
+                    try:
+                        text = data.decode('utf-8')
+                        text = re.sub(r'\ss="\d+"', '', text)
+                        text = re.sub(r'<cellStyles[^>]*>.*?</cellStyles>', '', text, flags=re.DOTALL)
+                        data = text.encode('utf-8')
+                    except Exception:
+                        pass
+                zout.writestr(item, data)
+        shutil.move(temp_path, filepath)
+        return True
+    except Exception as e:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+        raise Exception(f"Ошибка очистки {filepath}: {e}")
+
+
 def get_all_excel_files():
-    """Скачивает все Excel-файлы из папок на Яндекс.Диске."""
     url = "https://cloud-api.yandex.net/v1/disk/resources"
     headers = {"Authorization": f"OAuth {YANDEX_TOKEN}"}
-    
     params = {"path": FOLDER_PATH, "limit": 1000}
     
     response = None
@@ -91,6 +116,7 @@ def get_all_excel_files():
                     with open(new_path, "wb") as file:
                         file.write(content)
                     
+                    clean_excel_styles(new_path)
                     downloaded.append(f"{folder_name}/{f['name']}")
                 
                 time.sleep(1)
@@ -107,6 +133,7 @@ def get_all_excel_files():
                 with open(new_path, "wb") as file:
                     file.write(content)
                 
+                clean_excel_styles(new_path)
                 downloaded.append(f["name"])
             
             time.sleep(1)
@@ -120,12 +147,9 @@ def get_all_excel_files():
 def update_data():
     try:
         files = get_all_excel_files()
-        
         log_file = LOGS_DIR / "last_update.txt"
         log_file.write_text(f"Успешно скачано {len(files)} файлов", encoding="utf-8")
-        
         return True, f"Данные обновлены. Скачано файлов: {len(files)}"
-    
     except Exception as e:
         error_file = LOGS_DIR / "LAST_ERROR.txt"
         error_file.write_text(str(e), encoding="utf-8")
