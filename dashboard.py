@@ -36,6 +36,7 @@ st.markdown("""
 
 BASE_DIR = Path(__file__).parent
 SNAPSHOTS_DIR = BASE_DIR / "data" / "snapshots"
+FACT_PATH = BASE_DIR / "data" / "fact.csv"
 
 def parse_timestamp(ts):
     try:
@@ -186,6 +187,25 @@ def load_all_snapshots(paths):
                     
     rev = pd.concat(rev_parts, ignore_index=True) if rev_parts else pd.DataFrame()
     stf = pd.concat(staff_parts, ignore_index=True) if staff_parts else pd.DataFrame()
+
+    # --- МЕРЖ С ФАКТОМ ИЗ data/fact.csv ---
+    if FACT_PATH.exists() and not rev.empty:
+        try:
+            fact_df = pd.read_csv(FACT_PATH)
+            fact_df["crm_id"] = fact_df["crm_id"].astype(str).str.strip()
+            if "Ссылка" in rev.columns:
+                rev["crm_id"] = rev["Ссылка"].astype(str).str.extract(r"edit/([a-f0-9-]+)")[0]
+                rev = rev.merge(
+                    fact_df[["crm_id", "q1", "q2"]].rename(columns={"q1": "Факт_Q1", "q2": "Факт_Q2"}),
+                    on="crm_id",
+                    how="left"
+                )
+                rev["Факт_Q1"] = rev["Факт_Q1"].fillna(0)
+                rev["Факт_Q2"] = rev["Факт_Q2"].fillna(0)
+                rev = rev.drop(columns=["crm_id"])
+        except Exception as e:
+            errors.append(f"Ошибка мержа факта: {e}")
+
     return rev, stf, errors
 
 # --- ФУНКЦИИ РАСЧЕТА ---
@@ -552,18 +572,14 @@ for q_label, months in months_by_quarter.items():
         
         df_q = pd.DataFrame(mrows)
         
-        # Цветовое выделение ТОЛЬКО в колонках с дельтами
         def style_detail(df):
             css = pd.DataFrame('', index=df.index, columns=df.columns)
             for i in range(1, len(df), 2):
                 css.iloc[i, :] = 'background-color: #f8f9fa;'
-            
             delta_cols = ["Δ бюджет", "Δ бюджет, %", "Δ Prev. BR", "Δ Prev. BR, %"]
             for idx, row in df.iterrows():
                 name = str(row.get("Показатель", "")).replace("—", "").strip()
                 is_expense = name in ["Прямые расходы", "StaffCost", "COGS", "SGA"]
-                is_gm = name == "GM%"
-                
                 for col in delta_cols:
                     if col not in df.columns:
                         continue
@@ -577,10 +593,7 @@ for q_label, months in months_by_quarter.items():
                         continue
                     if v == 0:
                         continue
-                    if is_expense:
-                        good = v < 0
-                    else:
-                        good = v > 0
+                    good = (v < 0) if is_expense else (v > 0)
                     color = '#1a7f37' if good else '#cf222e'
                     css.loc[idx, col] = f'color: {color}; font-weight: 600;'
             return css
