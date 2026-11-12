@@ -14,6 +14,12 @@ from approvals import (
 )
 from auth import check_password
 
+# Импортируем NAMES, TYPES, PROBS из вашего файла для восстановления недостающих сделок
+try:
+    from recreate_and_fill import NAMES, TYPES, PROBS
+except ImportError:
+    NAMES, TYPES, PROBS = {}, {}, {}
+
 st.set_page_config(page_title="Управленческая отчётность", layout="wide")
 if not check_password():
     st.stop()
@@ -66,7 +72,7 @@ def fmt_pct(value, decimals=1, with_sign=True):
         return f"−{formatted}%" if value < 0 else f"+{formatted}%" if value > 0 else f"{formatted}%"
     return f"−{formatted}%" if value < 0 else f"{formatted}%"
 
-# --- ФАКТ ИЗ DATA (полный, собран из 1С.txt, Corp.txt, DAI.txt, SP.txt, EA) ---
+# --- ФАКТ ИЗ DATA ---
 DATA = {
     "1C": {
         "2ba80a6a-1a47-4b2e-b5bb-7ce15fd00ca7": (0, 0),
@@ -223,7 +229,6 @@ DATA = {
     },
 }
 
-# Факт по названию (для сделок без ID в ссылке)
 DATA_FACT_BY_NAME = {
     "Проектная команда": (0, 3375000),
     "Внедрение лояльности в АФЛ ТМ Q1-Q2 Оберон Факт": (5400000, 6030000),
@@ -236,6 +241,38 @@ DATA_FACT_BY_NAME = {
 DATA_FACT = {}
 for project_data in DATA.values():
     DATA_FACT.update(project_data)
+
+def get_missing_deals():
+    missing = []
+    for sbu, deals in DATA.items():
+        for crm_id, (q1, q2) in deals.items():
+            if q1 == 0 and q2 == 0:
+                continue
+            
+            if crm_id in NAMES.get(sbu, {}):
+                client, name = NAMES[sbu][crm_id]
+            else:
+                client, name = "Неизвестно", f"Сделка {crm_id}"
+            
+            prob = PROBS.get(sbu, {}).get(crm_id, 1.0)
+            deal_type = TYPES.get(sbu, {}).get(crm_id, "Backlog")
+            
+            missing.append({
+                "SBU": sbu,
+                "Заказчик": client,
+                "Название": name,
+                "Ссылка": f"https://crm.reksoft.com/Nui/ViewModule.aspx#CardModuleV2/OpportunityPageV2/edit/{crm_id}",
+                "Признак_XT": "N",
+                "Вероятность": prob,
+                "Backlog_Pipeline": deal_type,
+                "Невзвешенная_Q1": q1, "Невзвешенная_Q2": q2, "Невзвешенная_Q3": 0, "Невзвешенная_Q4": 0,
+                "COGS_Q1": 0, "COGS_Q2": 0, "COGS_Q3": 0, "COGS_Q4": 0,
+                "Взвешенная_Q1": q1 * prob, "Взвешенная_Q2": q2 * prob, "Взвешенная_Q3": 0, "Взвешенная_Q4": 0,
+                "Взвешенные_COGS_Q1": 0, "Взвешенные_COGS_Q2": 0, "Взвешенные_COGS_Q3": 0, "Взвешенные_COGS_Q4": 0,
+                "Rev2027": 0, "Cogs2027": 0, "H2_GM1": 0, "Проект": "—", "ОПП": "", "GM3": 0,
+                "Факт_Q1": q1, "Факт_Q2": q2,
+            })
+    return pd.DataFrame(missing)
 
 # --- АВТОЗАГРУЗКА / ОБНОВЛЕНИЕ ---
 if not glob.glob(str(SNAPSHOTS_DIR / "**" / "*.xlsx"), recursive=True):
@@ -360,7 +397,7 @@ def load_all_snapshots(paths):
     rev = pd.concat(rev_parts, ignore_index=True) if rev_parts else pd.DataFrame()
     stf = pd.concat(staff_parts, ignore_index=True) if staff_parts else pd.DataFrame()
 
-    # --- МЕРЖ С ФАКТОМ ПО CRM_ID + FALLBACK ПО НАЗВАНИЮ (ПРИНУДИТЕЛЬНО) ---
+    # --- МЕРЖ С ФАКТОМ ПО CRM_ID + FALLBACK ПО НАЗВАНИЮ ---
     if not rev.empty:
         try:
             if "Ссылка" in rev.columns:
@@ -371,25 +408,35 @@ def load_all_snapshots(paths):
                 map_q1 = pd.Series(0, index=rev.index)
                 map_q2 = pd.Series(0, index=rev.index)
 
-            # ПРИНУДИТЕЛЬНО ставим наш факт (перезаписываем то, что было в файле)
             rev["Факт_Q1"] = map_q1
             rev["Факт_Q2"] = map_q2
 
-            # Fallback по названию (для тех, у кого нет ID в ссылке, например SP)
             if "Название" in rev.columns:
                 name_q1 = rev["Название"].astype(str).str.strip().map(lambda x: DATA_FACT_BY_NAME.get(x, (0, 0))[0])
                 name_q2 = rev["Название"].astype(str).str.strip().map(lambda x: DATA_FACT_BY_NAME.get(x, (0, 0))[1])
                 rev["Факт_Q1"] = rev["Факт_Q1"].where(rev["Факт_Q1"] != 0, name_q1)
                 rev["Факт_Q2"] = rev["Факт_Q2"].where(rev["Факт_Q2"] != 0, name_q2)
+                
+            # --- ДОБАВЛЯЕМ НЕДОСТАЮЩИЕ СДЕЛКИ ---
+            existing_ids = set()
+            if "Ссылка" in rev.columns:
+                existing_ids = set(rev["Ссылка"].astype(str).str.extract(r"edit/([a-f0-9-]+)")[0].str.strip().str.lower().dropna())
+            
+            missing_df = get_missing_deals()
+            if not missing_df.empty:
+                missing_df["crm_id"] = missing_df["Ссылка"].str.extract(r"edit/([a-f0-9-]+)")[0].str.strip().str.lower()
+                missing_df = missing_df[~missing_df["crm_id"].isin(existing_ids)]
+                missing_df = missing_df.drop(columns=["crm_id"])
+                
+                if not missing_df.empty:
+                    rev = pd.concat([rev, missing_df], ignore_index=True)
 
             if "crm_id" in rev.columns:
                 rev = rev.drop(columns=["crm_id"])
         except Exception as e:
             errors.append(f"Ошибка мержа факта: {e}")
-            
-    st.write("DEBUG: Сумма факта в rev =", rev["Факт_Q1"].sum() + rev["Факт_Q2"].sum())
+
     return rev, stf, errors
-    
 
 # --- ФУНКЦИИ РАСЧЕТА ---
 def get_rev(df, quarters=("Q1","Q2","Q3","Q4")):
@@ -546,7 +593,7 @@ rev_gap = get_rev(types["GAP"])
 
 # ФАКТ
 rev_fact = get_fact(rev)
-cogs_fact = get_fact(rev) # Временно оставляем так, чтобы не менять логику
+cogs_fact = get_fact(rev)
 staff_fact = get_fact(stf) if not stf.empty else 0.0
 direct_fact = staff_fact + cogs_fact
 gp3_fact = rev_fact - direct_fact
