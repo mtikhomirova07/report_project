@@ -163,7 +163,6 @@ def read_excel_with_header(path, sheet_name):
 
     return data
 
-@st.cache_data(show_spinner=False)
 def load_all_snapshots(paths):
     rev_parts, staff_parts, errors = [], [], []
     for path in paths:
