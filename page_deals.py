@@ -30,18 +30,6 @@ def style_deals(df):
     return css
 
 def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_num, fmt_pct):
-    # CSS-хак: скрываем поле ввода в выпадающих списках
-    st.markdown("""
-        <style>
-            div[data-baseweb="select"] input {
-                display: none !important;
-            }
-            div[data-baseweb="select"] > div {
-                cursor: pointer !important;
-            }
-        </style>
-    """, unsafe_allow_html=True)
-
     st.title("Сделки")
     st.caption("Фильтры по менеджеру, типу сделки и вероятности.")
 
@@ -111,15 +99,15 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
 
     with col1:
         managers = ["Все"] + sorted(deals["Менеджер"].dropna().astype(str).unique().tolist())
-        st.selectbox("Менеджер", managers, key="deals_manager")
+        st.radio("Менеджер", managers, key="deals_manager", horizontal=False)
 
     with col2:
         types = ["Все", "Backlog", "Pipeline", "Extra GAP"]
-        st.selectbox("Тип сделки", types, key="deals_type")
+        st.radio("Тип сделки", types, key="deals_type", horizontal=False)
 
     with col3:
         prob_options = ["Все", 1, 25, 40, 60, 80, 100]
-        st.selectbox("Вероятность сделки", prob_options, key="deals_prob_single")
+        st.radio("Вероятность сделки", prob_options, key="deals_prob_single", horizontal=False)
 
     st.button("Сбросить фильтры", on_click=reset_filters)
 
@@ -128,7 +116,7 @@ def render_deals_page(deals, comparison_deals, selected_by, selected_date, fmt_n
     sel_prob = st.session_state.get("deals_prob_single", "Все")
 
     filtered = deals.copy()
-    
+
     # Убираем строки-заглушки
     filtered = filtered[filtered["Название"].astype(str).str.strip() != "Название"]
     filtered = filtered[filtered["Клиент"].astype(str).str.strip() != "Заказчик"]
