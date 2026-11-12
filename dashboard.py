@@ -557,9 +557,8 @@ for sbu in sorted(sbus):
     if sbu.strip() != "":
         by_list.append(sbu)
 
-# Используем multiselect, чтобы список открывался строго вниз
-selected_list = st.sidebar.multiselect("Бизнес-юнит (БЮ)", by_list, default=["Все"], max_selections=1)
-selected_by = selected_list[0] if selected_list else "Все"
+# Вернули стандартный selectbox
+selected_by = st.sidebar.selectbox("Бизнес-юнит (БЮ)", by_list)
 
 rev = filter_by_sbu(rev_all, selected_by)
 stf = filter_by_sbu(stf_all, selected_by)
